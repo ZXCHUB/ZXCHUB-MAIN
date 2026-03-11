@@ -1,0 +1,367 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
+
+local Settings = {
+    AutoFarmNPC = false,
+    AutoFarmPlayers = false,
+    RemoveCrates = false,
+    RemoveBarrels = false,
+    RemoveSpinningBlade = false
+}
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "ZXCHUB"
+ScreenGui.Parent = game.CoreGui
+ScreenGui.ResetOnSpawn = false
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 450, 0, 350)
+MainFrame.Position = UDim2.new(0.5, -225, 0.5, -175)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+MainFrame.BorderSizePixel = 0
+MainFrame.Visible = true
+MainFrame.Parent = ScreenGui
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 12)
+UICorner.Parent = MainFrame
+
+local UIGradient = Instance.new("UIGradient")
+UIGradient.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(30, 30, 60)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 10, 20))
+}
+UIGradient.Rotation = 45
+UIGradient.Parent = MainFrame
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 50)
+Title.BackgroundTransparency = 1
+Title.Text = "ZXCHUB"
+Title.TextColor3 = Color3.fromRGB(100, 200, 255)
+Title.TextSize = 32
+Title.Font = Enum.Font.GothamBold
+Title.Parent = MainFrame
+
+local Subtitle = Instance.new("TextLabel")
+Subtitle.Size = UDim2.new(1, 0, 0, 20)
+Subtitle.Position = UDim2.new(0, 0, 0, 40)
+Subtitle.BackgroundTransparency = 1
+Subtitle.Text = "by MarinZXC"
+Subtitle.TextColor3 = Color3.fromRGB(150, 150, 180)
+Subtitle.TextSize = 14
+Subtitle.Font = Enum.Font.Gotham
+Subtitle.Parent = MainFrame
+
+local CloseButton = Instance.new("TextButton")
+CloseButton.Size = UDim2.new(0, 40, 0, 40)
+CloseButton.Position = UDim2.new(1, -45, 0, 5)
+CloseButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+CloseButton.Text = "X"
+CloseButton.TextColor3 = Color3.new(1,1,1)
+CloseButton.TextSize = 24
+CloseButton.Font = Enum.Font.GothamBold
+CloseButton.Parent = MainFrame
+
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 8)
+CloseCorner.Parent = CloseButton
+
+CloseButton.MouseButton1Click:Connect(function()
+    ScreenGui.Enabled = false
+end)
+
+local Sidebar = Instance.new("Frame")
+Sidebar.Size = UDim2.new(0, 140, 1, -60)
+Sidebar.Position = UDim2.new(0, 10, 0, 60)
+Sidebar.BackgroundTransparency = 1
+Sidebar.Parent = MainFrame
+
+local ContentFrame = Instance.new("Frame")
+ContentFrame.Size = UDim2.new(1, -160, 1, -70)
+ContentFrame.Position = UDim2.new(0, 150, 0, 60)
+ContentFrame.BackgroundTransparency = 1
+ContentFrame.Parent = MainFrame
+
+local function CreateTabButton(name, yOffset)
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(1, 0, 0, 50)
+    button.Position = UDim2.new(0, 0, 0, yOffset)
+    button.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    button.Text = name
+    button.TextColor3 = Color3.fromRGB(200, 200, 255)
+    button.TextSize = 18
+    button.Font = Enum.Font.GothamSemibold
+    button.Parent = Sidebar
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = button
+    
+    return button
+end
+
+local function CreateToggle(parent, name, yOffset, callback)
+    local toggleFrame = Instance.new("Frame")
+    toggleFrame.Size = UDim2.new(1, 0, 0, 50)
+    toggleFrame.Position = UDim2.new(0, 0, 0, yOffset)
+    toggleFrame.BackgroundTransparency = 1
+    toggleFrame.Parent = parent
+    
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0.7, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Text = name
+    label.TextColor3 = Color3.fromRGB(220, 220, 220)
+    label.TextSize = 16
+    label.Font = Enum.Font.Gotham
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = toggleFrame
+    
+    local toggle = Instance.new("TextButton")
+    toggle.Size = UDim2.new(0, 50, 0, 28)
+    toggle.Position = UDim2.new(1, -60, 0.5, -14)
+    toggle.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+    toggle.Text = "OFF"
+    toggle.TextColor3 = Color3.fromRGB(255, 100, 100)
+    toggle.TextSize = 14
+    toggle.Font = Enum.Font.GothamBold
+    toggle.Parent = toggleFrame
+    
+    local togCorner = Instance.new("UICorner")
+    togCorner.CornerRadius = UDim.new(0, 14)
+    togCorner.Parent = toggle
+    
+    local enabled = false
+    
+    toggle.MouseButton1Click:Connect(function()
+        enabled = not enabled
+        if enabled then
+            toggle.BackgroundColor3 = Color3.fromRGB(50, 200, 100)
+            toggle.Text = "ON"
+            toggle.TextColor3 = Color3.new(1,1,1)
+        else
+            toggle.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+            toggle.Text = "OFF"
+            toggle.TextColor3 = Color3.fromRGB(255, 100, 100)
+        end
+        callback(enabled)
+    end)
+    
+    return toggleFrame
+end
+
+local AutoFarmTab = Instance.new("Frame")
+AutoFarmTab.Size = UDim2.new(1, 0, 1, 0)
+AutoFarmTab.BackgroundTransparency = 1
+AutoFarmTab.Visible = true
+AutoFarmTab.Parent = ContentFrame
+
+local MiscTab = Instance.new("Frame")
+MiscTab.Size = UDim2.new(1, 0, 1, 0)
+MiscTab.BackgroundTransparency = 1
+MiscTab.Visible = false
+MiscTab.Parent = ContentFrame
+
+local AutoFarmButton = CreateTabButton("AutoFarm", 0)
+local MiscButton = CreateTabButton("MISC", 60)
+
+AutoFarmButton.MouseButton1Click:Connect(function()
+    AutoFarmTab.Visible = true
+    MiscTab.Visible = false
+end)
+
+MiscButton.MouseButton1Click:Connect(function()
+    AutoFarmTab.Visible = false
+    MiscTab.Visible = true
+end)
+
+CreateToggle(AutoFarmTab, "AutoFarm NPC's", 0, function(state)
+    Settings.AutoFarmNPC = state
+end)
+
+CreateToggle(AutoFarmTab, "AutoFarm Players", 60, function(state)
+    Settings.AutoFarmPlayers = state
+end)
+
+CreateToggle(MiscTab, "Remove Crates", 0, function(state)
+    Settings.RemoveCrates = state
+    if state then
+        for _, crate in ipairs(Workspace.ActiveCrates:GetChildren()) do
+            pcall(function() crate:Destroy() end)
+        end
+    end
+end)
+
+CreateToggle(MiscTab, "Remove Barrels", 60, function(state)
+    Settings.RemoveBarrels = state
+    if state then
+        for _, barrel in ipairs(Workspace.ExplosiveTanks:GetChildren()) do
+            pcall(function() barrel:Destroy() end)
+        end
+    end
+end)
+
+CreateToggle(MiscTab, "Remove SpinningBlade", 120, function(state)
+    Settings.RemoveSpinningBlade = state
+    if state then
+        for _, obj in ipairs(Workspace.Obstacles:GetChildren()) do
+            if obj.Name == "SpinningBlade" then
+                pcall(function() obj:Destroy() end)
+            end
+        end
+    end
+end)
+
+local dragging, dragInput, dragStart, startPos
+
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+MainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    if dragging and dragInput then
+        local delta = dragInput.Position - dragStart
+        MainFrame.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.RightShift then
+        ScreenGui.Enabled = not ScreenGui.Enabled
+    end
+end)
+
+local function GetNearestTarget(folder, filterFunc, excludeNames)
+    local nearest, dist = nil, math.huge
+    local hrpPos = HumanoidRootPart.Position
+    
+    for _, model in ipairs(folder:GetChildren()) do
+        if model:IsA("Model") then
+            local skip = false
+            if excludeNames then
+                for _, ex in ipairs(excludeNames) do
+                    if model.Name == ex then skip = true break end
+                end
+            end
+            if skip then continue end
+            
+            if filterFunc and not filterFunc(model) then continue end
+            
+            local primary = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+            if primary then
+                local d = (primary.Position - hrpPos).Magnitude
+                if d < dist then
+                    dist = d
+                    nearest = primary
+                end
+            end
+        end
+    end
+    return nearest
+end
+
+local spawnDebounce = false
+local SpawnBoatRemote = ReplicatedStorage:WaitForChild("Events", 5):WaitForChild("SpawnBoat", 5)
+
+local function CheckAndSpawnBoat()
+    if not SpawnBoatRemote then return end
+
+    local myBoatName = LocalPlayer.Name .. "_Boat"
+    if Workspace.ActiveBoats:FindFirstChild(myBoatName) then
+        return
+    end
+
+    if spawnDebounce then return end
+    spawnDebounce = true
+
+    pcall(function()
+        SpawnBoatRemote:FireServer()
+        SpawnBoatRemote:FireServer("Default")
+        SpawnBoatRemote:FireServer("Boat")
+        SpawnBoatRemote:FireServer(1)
+        SpawnBoatRemote:FireServer("")
+    end)
+
+    task.delay(2, function()
+        spawnDebounce = false
+    end)
+end
+
+RunService.Heartbeat:Connect(function()
+    local anyAutoFarm = Settings.AutoFarmNPC or Settings.AutoFarmPlayers
+    
+    if anyAutoFarm then
+        CheckAndSpawnBoat()
+    end
+    
+    if Settings.AutoFarmNPC then
+        local filter = function(model) return model.Name == "NPC_Boat" end
+        local target = GetNearestTarget(Workspace.ActiveBoats, filter, nil)
+        if target then
+            HumanoidRootPart.CFrame = target.CFrame * CFrame.new(0, -5, 0)
+        end
+    end
+    
+    if Settings.AutoFarmPlayers then
+        local exclude = {LocalPlayer.Name .. "_Boat"}
+        local target = GetNearestTarget(Workspace.ActiveBoats, nil, exclude)
+        if target then
+            HumanoidRootPart.CFrame = target.CFrame * CFrame.new(0, -5, 0)
+        end
+    end
+    
+    if Settings.RemoveCrates then
+        for _, v in ipairs(Workspace.ActiveCrates:GetChildren()) do
+            pcall(function() v:Destroy() end)
+        end
+    end
+    
+    if Settings.RemoveBarrels then
+        for _, v in ipairs(Workspace.ExplosiveTanks:GetChildren()) do
+            pcall(function() v:Destroy() end)
+        end
+    end
+    
+    if Settings.RemoveSpinningBlade then
+        for _, v in ipairs(Workspace.Obstacles:GetChildren()) do
+            if v.Name == "SpinningBlade" then
+                pcall(function() v:Destroy() end)
+            end
+        end
+    end
+end)
+
+LocalPlayer.CharacterAdded:Connect(function(newChar)
+    Character = newChar
+    HumanoidRootPart = newChar:WaitForChild("HumanoidRootPart")
+end)
