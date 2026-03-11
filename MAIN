@@ -4,24 +4,24 @@ local HttpService      = game:GetService("HttpService")
 local lp               = Players.LocalPlayer
 
 local VALID_KEYS = {
-    ["DrivingEmpireScriptOuTOPFARMLOLLL"] = true,
+    ["WEll,githubBABY"] = true,
 }
 
 local KEY_LINK   = "https://discord.gg/rnJC4yYfsU"
 
 local supportedGames = {
-    [111405784075400] = "https://pastebin.com/raw/8gNHT5fd",
-    [130739873848552] = "https://pastebin.com/raw/EbzMm0Vb",
-    [129230994638464] = "https://pastebin.com/raw/EbzMm0Vb",
-    [81384381511872]  = "https://pastebin.com/raw/LTG9gf9L",
-    [537413528]       = "https://pastebin.com/raw/1v1Pq6Wg",
-    [71475893938303]  = "https://pastebin.com/raw/kTdC32FB",
-    [88933961678687]  = "https://pastebin.com/raw/fEcMXY49",
-    [132046904416072] = "https://pastebin.com/raw/FUp8dTG5",
-    [118433033586507] = "https://pastebin.com/raw/McBPp0EL",
-    [77884312767869]  = "https://pastebin.com/raw/YtzKW0Jz",
-    [114640202062357]  = "https://pastebin.com/raw/nXFk6dDn",
-    [3351674303]  = "https://pastebin.com/raw/iW3EBYtG",
+    [111405784075400] = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Case%20Unboxing",
+    [130739873848552] = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Basketball%3AZero",
+    [129230994638464] = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Basketball%3AZero",
+    [81384381511872]  = "github.com/ZXCHUB/ZXCHUB-MAIN/blob/main/Build%20a%20battleship",
+    [537413528]       = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Build%20a%20battleship",
+    [71475893938303]  = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Deathrun%20RNG",
+    [88933961678687]  = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Hyper%20Speed%20Runner",
+    [132046904416072] = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/%2B1%20Speed%20Motorcycle%20Tsunami",
+    [118433033586507] = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Simple%20Spells",
+    [77884312767869]  = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Survive%20Heat%20For%20Brainrots",
+    [114640202062357]  = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Swing%20obby%20for%20brainrots",
+    [3351674303]  = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Driving%20Empire%20PREMIUM",
 }
 
 local playerGui = lp:WaitForChild("PlayerGui")
