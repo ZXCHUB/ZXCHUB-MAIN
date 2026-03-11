@@ -1,0 +1,204 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local guiVisible = true
+
+local settings = {
+    TeleportToBall = false,
+    Bind_TeleportToBall = Enum.KeyCode.Q,
+    NeverLoseBall = false,
+    Bind_NeverLoseBall = Enum.KeyCode.E,
+    HomeHop = false,
+    Bind_HomeHop = Enum.KeyCode.Z,
+    AwayHop = false,
+    Bind_AwayHop = Enum.KeyCode.X
+}
+
+local basketball = workspace:WaitForChild("Basketball")
+local court = workspace:WaitForChild("Court", 10)
+local timer1 = court and court:WaitForChild("Timer1", 5)
+local timer2 = court and court:WaitForChild("Timer2", 5)
+
+local sg = Instance.new("ScreenGui")
+sg.Name = "ZXCHUB"
+sg.ResetOnSpawn = false
+sg.Parent = player:WaitForChild("PlayerGui")
+
+local main = Instance.new("Frame")
+main.Size = UDim2.new(0, 520, 0, 480)
+main.Position = UDim2.new(0.5, -260, 0.5, -240)
+main.BackgroundColor3 = Color3.fromRGB(12, 12, 22)
+main.BorderSizePixel = 0
+main.Parent = sg
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 20)
+corner.Parent = main
+
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(0, 140, 255)
+stroke.Thickness = 3
+stroke.Transparency = 0.25
+stroke.Parent = main
+
+local gradient = Instance.new("UIGradient")
+gradient.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(20, 35, 70)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(5, 10, 25))
+}
+gradient.Rotation = 135
+gradient.Parent = main
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 80)
+title.BackgroundTransparency = 1
+title.Text = "ZXCHUB"
+title.TextColor3 = Color3.fromRGB(70, 190, 255)
+title.TextSize = 48
+title.Font = Enum.Font.GothamBlack
+title.TextStrokeTransparency = 0.65
+title.TextStrokeColor3 = Color3.new(0,0,0)
+title.Parent = main
+
+local contentFrame = Instance.new("Frame")
+contentFrame.Size = UDim2.new(1, -40, 1, -100)
+contentFrame.Position = UDim2.new(0, 20, 0, 90)
+contentFrame.BackgroundTransparency = 1
+contentFrame.Parent = main
+
+local activeLabel = Instance.new("TextLabel")
+activeLabel.Size = UDim2.new(0, 240, 0, 40)
+activeLabel.Position = UDim2.new(1, -250, 0, 5)
+activeLabel.BackgroundTransparency = 0.6
+activeLabel.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+activeLabel.Text = "Active: None"
+activeLabel.TextColor3 = Color3.fromRGB(200, 255, 200)
+activeLabel.TextSize = 18
+activeLabel.Font = Enum.Font.GothamSemibold
+activeLabel.TextXAlignment = Enum.TextXAlignment.Center
+activeLabel.Parent = main
+
+local activeCorner = Instance.new("UICorner")
+activeCorner.CornerRadius = UDim.new(0, 12)
+activeCorner.Parent = activeLabel
+
+local function updateActive()
+    local acts = {}
+    if settings.TeleportToBall then table.insert(acts, "TP Ball") end
+    if settings.NeverLoseBall then table.insert(acts, "No Lose") end
+    if settings.HomeHop then table.insert(acts, "Home Hop") end
+    if settings.AwayHop then table.insert(acts, "Away Hop") end
+    activeLabel.Text = "Active: " .. (#acts > 0 and table.concat(acts, " • ") or "None")
+end
+
+local function createFeature(name, posY, toggleKey, bindKey)
+    local toggle = Instance.new("TextButton")
+    toggle.Size = UDim2.new(0.9, 0, 0, 50)
+    toggle.Position = UDim2.new(0.05, 0, posY, 0)
+    toggle.BackgroundColor3 = Color3.fromRGB(35, 35, 55)
+    toggle.Text = name .. ": OFF"
+    toggle.TextColor3 = Color3.new(1,1,1)
+    toggle.TextSize = 20
+    toggle.Font = Enum.Font.GothamSemibold
+    toggle.Parent = contentFrame
+
+    toggle.MouseButton1Click:Connect(function()
+        settings[toggleKey] = not settings[toggleKey]
+        toggle.Text = name .. ": " .. (settings[toggleKey] and "ON" or "OFF")
+        toggle.BackgroundColor3 = settings[toggleKey] and Color3.fromRGB(50, 150, 80) or Color3.fromRGB(35, 35, 55)
+        updateActive()
+    end)
+
+    local bindBtn = Instance.new("TextButton")
+    bindBtn.Size = UDim2.new(0.9, 0, 0, 50)
+    bindBtn.Position = UDim2.new(0.05, 0, posY + 0.13, 0)
+    bindBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 65)
+    bindBtn.Text = "Bind " .. name .. ": " .. settings[bindKey].Name
+    bindBtn.TextColor3 = Color3.new(1,1,1)
+    bindBtn.TextSize = 18
+    bindBtn.Font = Enum.Font.Gotham
+    bindBtn.Parent = contentFrame
+
+    bindBtn.MouseButton1Click:Connect(function()
+        bindBtn.Text = "Press any key..."
+        local conn
+        conn = UserInputService.InputBegan:Connect(function(input)
+            if input.KeyCode ~= Enum.KeyCode.Unknown then
+                settings[bindKey] = input.KeyCode
+                bindBtn.Text = "Bind " .. name .. ": " .. input.KeyCode.Name
+                conn:Disconnect()
+            end
+        end)
+    end)
+end
+
+createFeature("Teleport to Ball", 0.05, "TeleportToBall", "Bind_TeleportToBall")
+createFeature("Never Lose Ball", 0.28, "NeverLoseBall", "Bind_NeverLoseBall")
+createFeature("Home Hop", 0.51, "HomeHop", "Bind_HomeHop")
+createFeature("Away Hop", 0.74, "AwayHop", "Bind_AwayHop")
+
+-- Платформа 2000x2000
+local floatPlatform
+local function toggleFloat()
+    if settings.NeverLoseBall then
+        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local hrp = player.Character.HumanoidRootPart
+            local pos = hrp.Position + Vector3.new(0, 50, 0)
+
+            floatPlatform = Instance.new("Part")
+            floatPlatform.Size = Vector3.new(2000, 1, 2000)
+            floatPlatform.Position = pos
+            floatPlatform.Anchored = true
+            floatPlatform.CanCollide = true
+            floatPlatform.Transparency = 1
+            floatPlatform.Parent = workspace
+
+            hrp.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
+        end
+    else
+        if floatPlatform then floatPlatform:Destroy() end
+    end
+end
+
+-- Бинды
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == settings.Bind_TeleportToBall and settings.TeleportToBall then
+        if basketball then
+            player.Character.HumanoidRootPart.CFrame = basketball.CFrame + Vector3.new(0, 5, 0)
+        end
+    end
+    if input.KeyCode == settings.Bind_NeverLoseBall then
+        toggleFloat()
+    end
+    if input.KeyCode == settings.Bind_HomeHop and settings.HomeHop then
+        if timer1 then
+            player.Character.HumanoidRootPart.CFrame = timer1.CFrame + Vector3.new(0, 5, 0)
+        end
+    end
+    if input.KeyCode == settings.Bind_AwayHop and settings.AwayHop then
+        if timer2 then
+            player.Character.HumanoidRootPart.CFrame = timer2.CFrame + Vector3.new(0, 5, 0)
+        end
+    end
+end)
+
+-- Respawn
+player.CharacterAdded:Connect(function(char)
+    char:WaitForChild("Humanoid")
+    if settings.NeverLoseBall then
+        toggleFloat()
+    end
+end)
+
+-- Toggle GUI
+UserInputService.InputBegan:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.RightShift then
+        guiVisible = not guiVisible
+        main.Visible = guiVisible
+    end
+end)
+
+print("ZXCHUB loaded - RightShift to toggle")
