@@ -3,8 +3,7 @@
 --   QOT structure based on proven DE Hunter pattern
 -- ============================================================
 
-local MyLink = "https://raw.githubusercontent.com/ZXCHUB/scripts/main/MegaScript.lua"
--- ^ Замени на свою ссылку если нужно. Используется для авто-реинжекта после телепорта.
+local MyLink = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Defend%20your%20base%20from%2067"
 
 local Players      = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
