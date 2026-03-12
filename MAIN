@@ -22,6 +22,7 @@ local supportedGames = {
     [77884312767869]  = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Survive%20Heat%20For%20Brainrots",
     [114640202062357]  = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Swing%20obby%20for%20brainrots",
     [3351674303]  = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Driving%20Empire%20PREMIUM",
+    [102669100769936]  = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Defend%20your%20base%20from%2067",
 }
 
 local playerGui = lp:WaitForChild("PlayerGui")
