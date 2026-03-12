@@ -4,6 +4,7 @@
 -- ============================================================
 
 local MyLink = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Defend%20your%20base%20from%2067"
+-- ^ Замени на свою ссылку если нужно. Используется для авто-реинжекта после телепорта.
 
 local Players      = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -267,18 +268,45 @@ if game.PlaceId == LOBBY_ID then
 
     local function fireQueue()
         setStatus("Joining queue...")
+
+        -- Телепортируемся к хитбоксу очереди (FindFirstChild, без зависания)
         pcall(function()
-            local q2=workspace:WaitForChild("Queues"):GetChildren()[2]
-            local hb=q2 and q2:FindFirstChild("Hitbox")
-            if hb then lp.Character.HumanoidRootPart.CFrame=hb.CFrame end
+            local queuesFolder = workspace:FindFirstChild("Queues")
+            if queuesFolder then
+                for _, q in ipairs(queuesFolder:GetChildren()) do
+                    local hb = q:FindFirstChild("Hitbox")
+                    if hb then
+                        lp.Character.HumanoidRootPart.CFrame = hb.CFrame
+                        break
+                    end
+                end
+            end
         end)
-        task.wait(0.3)
-        local Remote=game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("Queue")
-        local maps=Save.IsBestMap and MapOrder or {Save.SelectedMap}
-        local diffs=Save.IsBestDiff and {"Endless","Hard","Medium","Easy"} or {Save.SelectedDiff}
-        for _,map in ipairs(maps) do
-            for _,diff in ipairs(diffs) do Remote:FireServer("create",map,4,diff); task.wait(0.05) end
+        task.wait(0.5)
+
+        -- Remote с таймаутом 5 сек
+        local Remote = nil
+        pcall(function()
+            Remote = game:GetService("ReplicatedStorage")
+                :WaitForChild("Remotes", 5)
+                :WaitForChild("Queue", 5)
+        end)
+
+        if not Remote then
+            setStatus("ERROR: Queue remote not found!")
+            return
         end
+
+        local maps  = Save.IsBestMap  and MapOrder                          or {Save.SelectedMap}
+        local diffs = Save.IsBestDiff and {"Endless","Hard","Medium","Easy"} or {Save.SelectedDiff}
+
+        for _,map in ipairs(maps) do
+            for _,diff in ipairs(diffs) do
+                pcall(function() Remote:FireServer("create", map, 4, diff) end)
+                task.wait(0.1)
+            end
+        end
+
         setStatus("Waiting for teleport...")
     end
 
@@ -334,8 +362,10 @@ elseif game.PlaceId == GAME_ID then
     local priceCache      = {}
 
     local function cleanNumber(text)
-        if not text or text == "" then return 0 end
-        return tonumber(tostring(text):gsub("%D","")) or 0
+        if not text then return 0 end
+        local s = tostring(text):gsub("<[^>]+>",""):gsub("[^%d]","")
+        if s == "" then return 0 end
+        return tonumber(s) or 0
     end
 
     local function getBalance()
