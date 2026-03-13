@@ -1,10 +1,9 @@
 -- ============================================================
---   ZXCHub MegaScript v3.1  |  Base Tycoon + Lobby
---   QOT structure based on proven DE Hunter pattern
+--   ZXCHub MegaScript v3.2  |  Base Tycoon + Lobby
+--   + RobuxTurret/RobuxFarm fallback если нет обычных юнитов
 -- ============================================================
 
 local MyLink = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Defend%20your%20base%20from%2067"
--- ^ Замени на свою ссылку если нужно. Используется для авто-реинжекта после телепорта.
 
 local Players      = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -40,7 +39,7 @@ local function fmtTime(s)
 end
 
 -- ============================================================
--- QOT HELPER  (как в DE Hunter — вызывается в момент телепорта)
+-- QOT HELPER
 -- ============================================================
 local function registerQOT()
     local qot = nil
@@ -60,15 +59,12 @@ local function registerQOT()
         if genv.queue_on_teleports then qot = genv.queue_on_teleports; return end
     end)
     if qot then
-        -- Инжектим loadstring(HttpGet) — точно так же как DE Hunter
         qot('repeat task.wait() until game:IsLoaded(); loadstring(game:HttpGet("' .. MyLink .. '"))()')
         print("[ZXCHub] QOT registered OK")
     else
         warn("[ZXCHub] QOT not found on this executor")
     end
 end
-
--- Регистрируем сразу при запуске
 registerQOT()
 
 -- ============================================================
@@ -112,7 +108,7 @@ Logo.TextSize=20; Logo.TextXAlignment=Enum.TextXAlignment.Left; Logo.ZIndex=11
 
 local VBadge=Instance.new("TextLabel",TopBar)
 VBadge.Size=UDim2.new(0,60,0,24); VBadge.Position=UDim2.new(0,225,0.5,-12)
-VBadge.BackgroundColor3=Color3.fromRGB(110,40,200); VBadge.Text="v3.1"
+VBadge.BackgroundColor3=Color3.fromRGB(110,40,200); VBadge.Text="v3.2"
 VBadge.TextColor3=Color3.new(1,1,1); VBadge.Font=Enum.Font.GothamBold
 VBadge.TextSize=12; VBadge.ZIndex=11
 Instance.new("UICorner",VBadge).CornerRadius=UDim.new(0,6)
@@ -268,8 +264,6 @@ if game.PlaceId == LOBBY_ID then
 
     local function fireQueue()
         setStatus("Joining queue...")
-
-        -- Телепортируемся к хитбоксу очереди (FindFirstChild, без зависания)
         pcall(function()
             local queuesFolder = workspace:FindFirstChild("Queues")
             if queuesFolder then
@@ -284,7 +278,6 @@ if game.PlaceId == LOBBY_ID then
         end)
         task.wait(0.5)
 
-        -- Remote с таймаутом 5 сек
         local Remote = nil
         pcall(function()
             Remote = game:GetService("ReplicatedStorage")
@@ -484,31 +477,96 @@ elseif game.PlaceId == GAME_ID then
     end
     setStatus("Tiles: "..#farmTiles.." farms | "..#turretTiles.." turrets")
 
-    local function buyUnit(tile, prefix)
-        local n,pr,m = prefix.."1",100,0
+    -- ============================================================
+    -- ИСПРАВЛЕННАЯ ФУНКЦИЯ buyUnit
+    -- Порядок попыток для каждого типа:
+    --   1. Ищем обычный prefix (Turret / Farm) — берём с макс. id
+    --   2. Если не нашли ни одного — пробуем Robux-версию (RobuxTurret / RobuxFarm)
+    --   3. Если и там ничего — пропускаем тайл с предупреждением
+    -- ============================================================
+    local function findBestUnit(prefix)
+        -- Возвращает { name, price } или nil
+        -- Ищет все кнопки в Build HUD с именем начинающимся на prefix
+        -- берёт ту у которой наибольший числовой суффикс
+        local bestName, bestPrice, bestId = nil, 0, 0
         pcall(function()
-            for _,item in pairs(lp.PlayerGui.Hud.Build.Holder.Scroller:GetChildren()) do
-                if item.Name:sub(1,#prefix)==prefix then
-                    local id=tonumber(item.Name:match("%d+")) or 0
-                    if id>m then m,n,pr=id,item.Name,cleanNumber(item.Buy.Amount.Text) end
+            local scroller = lp.PlayerGui.Hud.Build.Holder.Scroller
+            for _, item in pairs(scroller:GetChildren()) do
+                if item.Name:sub(1, #prefix) == prefix then
+                    local id = tonumber(item.Name:match("%d+")) or 0
+                    if id > bestId then
+                        bestId    = id
+                        bestName  = item.Name
+                        bestPrice = cleanNumber(item.Buy.Amount.Text)
+                    end
                 end
             end
         end)
-        while getBalance()<pr do task.wait(1) end
-        tp(tile); task.wait(0.5)
-        UnitEvent:FireServer("buy",n,tile)
+        if bestName then
+            return { name = bestName, price = bestPrice }
+        end
+        return nil
+    end
+
+    local function buyUnit(tile, unitType)
+        -- unitType: "Turret" или "Farm"
+        -- Сначала пробуем обычный, потом Robux-версию
+        local prefixOrder = { unitType, "Robux" .. unitType }
+
+        local chosen = nil
+        for _, prefix in ipairs(prefixOrder) do
+            chosen = findBestUnit(prefix)
+            if chosen then
+                setStatus("Buying " .. chosen.name .. " ($" .. chosen.price .. ")")
+                break
+            end
+        end
+
+        if not chosen then
+            -- Ни обычный, ни Robux не найдены — пропускаем
+            warn("[ZXCHub] buyUnit: юнит типа '" .. unitType .. "' или 'Robux" .. unitType .. "' не найден в магазине, пропускаем тайл")
+            setStatus("SKIP: no " .. unitType .. " available")
+            return nil
+        end
+
+        -- Ждём достаточно золота
+        local waited = 0
+        while getBalance() < chosen.price do
+            task.wait(1)
+            waited = waited + 1
+            if waited % 5 == 0 then
+                setStatus("Waiting $" .. chosen.price .. " for " .. chosen.name .. " (have $" .. getBalance() .. ")")
+                -- Перепроверяем — вдруг появился более дешёвый вариант
+                for _, prefix in ipairs(prefixOrder) do
+                    local recheck = findBestUnit(prefix)
+                    if recheck and recheck.price <= getBalance() then
+                        chosen = recheck
+                        break
+                    end
+                end
+            end
+        end
+
+        tp(tile)
+        task.wait(0.5)
+        UnitEvent:FireServer("buy", chosen.name, tile)
         task.wait(1)
+
         return tile:FindFirstChildOfClass("Model")
     end
 
     local buildList={mainFarm}
+
     setStatus("Building farms...")
     for _,t in ipairs(farmTiles) do
-        local m=buyUnit(t,"Farm"); if m then table.insert(buildList,m) end
+        local m = buyUnit(t, "Farm")
+        if m then table.insert(buildList, m) end
     end
+
     setStatus("Building turrets...")
     for _,t in ipairs(turretTiles) do
-        local m=buyUnit(t,"Turret"); if m then table.insert(buildList,m) end
+        local m = buyUnit(t, "Turret")
+        if m then table.insert(buildList, m) end
     end
 
     -- PHASE 3: Cache
@@ -559,7 +617,7 @@ elseif game.PlaceId == GAME_ID then
         setStatus("Boss reset - rebuilding farms...")
         farmsSold=false
         for _,t in ipairs(farmTiles) do
-            local m=buyUnit(t,"Farm")
+            local m = buyUnit(t, "Farm")   -- тоже использует новый fallback
             if m then table.insert(buildList,m); updateObjectData(m) end
         end
         setStatus("Farms restored")
