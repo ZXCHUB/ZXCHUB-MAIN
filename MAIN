@@ -4,7 +4,7 @@ local HttpService  = game:GetService("HttpService")
 local lp           = Players.LocalPlayer
 
 local VALID_KEYS = {
-    ["ccb76de9-8c85-4aca-ab4e-68dedec1ec5e"] = true,
+    ["cc-4aka-ab4e-68D5ede-C1ec5e"] = true,
 }
 
 local DISCORD_LINK = "https://discord.gg/rnJC4yYfsU"
@@ -26,6 +26,7 @@ local supportedGames = {
     [3351674303]      = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Driving%20Empire%20PREMIUM",
     [102669100769936] = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Defend%20your%20base%20from%2067",
     [70390793715007] = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Hooked!",
+    [140270923132362] = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Tiny%20Empires",
 }
 
 -- ════════════════════════════════════════
