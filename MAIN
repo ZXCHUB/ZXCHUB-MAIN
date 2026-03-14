@@ -27,6 +27,7 @@ local supportedGames = {
     [102669100769936] = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Defend%20your%20base%20from%2067",
     [70390793715007] = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Hooked!",
     [140270923132362] = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Tiny%20Empires",
+    [107583203372622] = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Clicking%20Simulator%20Ultimate",
 }
 
 -- ════════════════════════════════════════
