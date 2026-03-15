@@ -29,6 +29,7 @@ local supportedGames = {
     [140270923132362] = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Tiny%20Empires",
     [107583203372622] = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Clicking%20Simulator%20Ultimate",
     [97365843755210] = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Cut%20Grass%20For%20Brainrots",
+    [109397169461300] = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Sniper%20Duels",
 }
 
 local function getTime()
