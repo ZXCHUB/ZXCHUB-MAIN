@@ -4,7 +4,7 @@ local HttpService  = game:GetService("HttpService")
 local lp           = Players.LocalPlayer
 
 local VALID_KEYS = {
-    ["cc-4aka-ab4e-68D5ede-C1ec5e"] = true,
+    ["jAlEcKCNcgX67wZoP5F3WnlO"] = true,
 }
 
 local DISCORD_LINK = "https://discord.gg/rnJC4yYfsU"
