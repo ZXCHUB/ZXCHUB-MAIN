@@ -9,7 +9,7 @@ local lp          = Players.LocalPlayer
 local SCRIPT_URL = "https://pastebin.com/raw/7cL3UZ7u"
 local KEY_LINK   = "https://discord.gg/rnJC4yYfsU"
 local VALID_KEYS = {
-    ["jAlEcKCNcgX67wZoP5F3WnlO"] = true,
+    ["f4253e64-95ac-4e38-bcf1-5695b18c1058"] = true,
 }
 
 -- ══════════════════════════════
