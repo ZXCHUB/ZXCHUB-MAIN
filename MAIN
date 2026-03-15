@@ -31,9 +31,6 @@ local supportedGames = {
     [97365843755210] = "https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Cut%20Grass%20For%20Brainrots",
 }
 
--- ════════════════════════════════════════
--- SAVE / LOAD  (12-hour bypass)
--- ════════════════════════════════════════
 local function getTime()
     return os.time()
 end
@@ -55,11 +52,9 @@ local function isKeySaved()
             local data = HttpService:JSONDecode(readfile(SAVE_FILE))
             if data and data.savedAt then
                 local elapsed = getTime() - data.savedAt
-                -- 12 часов = 43200 секунд
                 if elapsed < (KEY_EXPIRE_HOURS * 3600) then
                     ok = true
                 else
-                    -- истёк — удаляем
                     if delfile then pcall(delfile, SAVE_FILE) end
                 end
             end
@@ -68,9 +63,6 @@ local function isKeySaved()
     return ok
 end
 
--- ════════════════════════════════════════
--- LOAD GAME
--- ════════════════════════════════════════
 local function loadGame(sg, overlay)
     local fi = TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
     for _, v in ipairs(sg:GetDescendants()) do
@@ -103,11 +95,7 @@ local function loadGame(sg, overlay)
     end
 end
 
--- ════════════════════════════════════════
--- BYPASS — если ключ уже сохранён
--- ════════════════════════════════════════
 if isKeySaved() then
-    -- Показываем короткое уведомление и сразу грузим
     local playerGui = lp:WaitForChild("PlayerGui")
     local guiParent = (gethui and gethui()) or playerGui
 
@@ -139,7 +127,6 @@ if isKeySaved() then
     nl.TextColor3 = Color3.fromRGB(120,255,150)
     nl.TextSize = 15; nl.Font = Enum.Font.GothamBold
 
-    -- Считаем сколько времени осталось
     pcall(function()
         if isfile and isfile(SAVE_FILE) then
             local data = HttpService:JSONDecode(readfile(SAVE_FILE))
@@ -157,9 +144,6 @@ if isKeySaved() then
     return
 end
 
--- ════════════════════════════════════════
--- GUI
--- ════════════════════════════════════════
 local playerGui = lp:WaitForChild("PlayerGui")
 local guiParent = (gethui and gethui()) or playerGui
 
@@ -196,14 +180,12 @@ local cg = Instance.new("UIGradient",card)
 cg.Color = ColorSequence.new(Color3.fromRGB(14,10,28), Color3.fromRGB(8,6,18))
 cg.Rotation = 135
 
--- Title
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1,0,0,36); title.Position = UDim2.fromOffset(0,14)
 title.BackgroundTransparency = 1; title.Text = "ZXCHUB Key"
 title.TextColor3 = Color3.fromRGB(200,145,255); title.TextSize = 20
 title.Font = Enum.Font.GothamBlack; title.ZIndex = 3; title.Parent = card
 
--- Sub
 local sub = Instance.new("TextLabel")
 sub.Size = UDim2.new(1,-40,0,18); sub.Position = UDim2.fromOffset(20,52)
 sub.BackgroundTransparency = 1; sub.Text = "Enter key to continue"
@@ -211,7 +193,6 @@ sub.TextColor3 = Color3.fromRGB(110,80,160); sub.TextSize = 12
 sub.Font = Enum.Font.Gotham; sub.TextXAlignment = Enum.TextXAlignment.Left
 sub.ZIndex = 3; sub.Parent = card
 
--- Input
 local inputBg = Instance.new("Frame")
 inputBg.Size = UDim2.new(1,-40,0,38); inputBg.Position = UDim2.fromOffset(20,80)
 inputBg.BackgroundColor3 = Color3.fromRGB(20,14,34); inputBg.BorderSizePixel = 0
@@ -228,7 +209,6 @@ input.TextColor3 = Color3.fromRGB(220,188,255); input.TextSize = 13
 input.Font = Enum.Font.Gotham; input.ClearTextOnFocus = false
 input.ZIndex = 4; input.Parent = inputBg
 
--- Status
 local statusLbl = Instance.new("TextLabel")
 statusLbl.Size = UDim2.new(1,-40,0,18); statusLbl.Position = UDim2.fromOffset(20,126)
 statusLbl.BackgroundTransparency = 1; statusLbl.Text = ""
@@ -237,7 +217,6 @@ statusLbl.Font = Enum.Font.GothamSemibold
 statusLbl.TextXAlignment = Enum.TextXAlignment.Left
 statusLbl.ZIndex = 3; statusLbl.Parent = card
 
--- Check Key button
 local checkBtn = Instance.new("TextButton")
 checkBtn.Size = UDim2.fromOffset(158,38); checkBtn.Position = UDim2.fromOffset(20,154)
 checkBtn.BackgroundColor3 = Color3.fromRGB(85,32,158)
@@ -254,7 +233,6 @@ checkBtn.MouseLeave:Connect(function()
     TweenService:Create(checkBtn,TweenInfo.new(0.15),{BackgroundColor3=Color3.fromRGB(85,32,158)}):Play()
 end)
 
--- Get Key button (Discord)
 local getKeyBtn = Instance.new("TextButton")
 getKeyBtn.Size = UDim2.fromOffset(158,38); getKeyBtn.Position = UDim2.fromOffset(200,154)
 getKeyBtn.BackgroundColor3 = Color3.fromRGB(40,24,80)
@@ -273,7 +251,6 @@ getKeyBtn.MouseLeave:Connect(function()
 end)
 
 getKeyBtn.MouseButton1Click:Connect(function()
-    -- Копируем Discord ссылку
     pcall(function() setclipboard(DISCORD_LINK) end)
     pcall(function() if toclipboard then toclipboard(DISCORD_LINK) end end)
     getKeyBtn.Text = "✓ discord.gg copied!"
@@ -284,9 +261,6 @@ getKeyBtn.MouseButton1Click:Connect(function()
     end)
 end)
 
--- ════════════════════════════════════════
--- CHECK KEY
--- ════════════════════════════════════════
 local function checkKey()
     local key = input.Text:match("^%s*(.-)%s*$")
     if key == "" then
@@ -295,7 +269,6 @@ local function checkKey()
         return
     end
 
-    -- Dev bypass
     if VALID_KEYS[key] then
         statusLbl.Text = ""
         checkBtn.Text = "✓ Loading..."
@@ -309,7 +282,6 @@ local function checkKey()
     statusLbl.Text = "Checking..."
     statusLbl.TextColor3 = Color3.fromRGB(160,120,220)
 
-    -- Work.ink API
     local apiUrl = "https://work.ink/_api/v2/token/isValid/" .. HttpService:UrlEncode(key)
     local ok, response = pcall(function()
         return game:HttpGet(apiUrl, true)
@@ -331,7 +303,7 @@ local function checkKey()
         statusLbl.Text = ""
         checkBtn.Text = "✓ Loading..."
         checkBtn.BackgroundColor3 = Color3.fromRGB(25,80,45)
-        saveKeyTime()  -- сохраняем время — 12 часов не будет спрашивать
+        saveKeyTime()
         task.wait(0.6)
         loadGame(sg, overlay)
     else
@@ -347,7 +319,6 @@ end
 checkBtn.MouseButton1Click:Connect(checkKey)
 input.FocusLost:Connect(function(enter) if enter then checkKey() end end)
 
--- Анимация появления
 card.BackgroundTransparency = 1
 card.Position = UDim2.new(0.5,0,0.5,40)
 TweenService:Create(card, TweenInfo.new(0.45,Enum.EasingStyle.Back,Enum.EasingDirection.Out),
