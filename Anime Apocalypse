@@ -1,28 +1,51 @@
+-- ════════════════════════════════════════════════════════
+-- BOOT GUARDS
+-- After queue_on_teleport the executor may inject the script
+-- before the new place has finished loading.  Wait for both
+-- the game and the LocalPlayer to be fully ready.
+-- ════════════════════════════════════════════════════════
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
+local Players = game:GetService("Players")
+
+-- LocalPlayer may be nil for a short window right after teleport
+local lp = Players.LocalPlayer
+if not lp then
+    repeat task.wait(0.05) until Players.LocalPlayer
+    lp = Players.LocalPlayer
+end
+
+-- ════════════════════════════════════════════════════════
+-- SERVICES
+-- ════════════════════════════════════════════════════════
 local UIS         = game:GetService("UserInputService")
 local TweenS      = game:GetService("TweenService")
 local HttpService = game:GetService("HttpService")
 local RunService  = game:GetService("RunService")
 local CoreGui     = game:GetService("CoreGui")
-local Players     = game:GetService("Players")
 local RS          = game:GetService("ReplicatedStorage")
-local lp          = Players.LocalPlayer
 
--- True when running in the lobby/matchmaking place
+-- game.PlaceId is now guaranteed correct because game.Loaded fired
 local isMainPlace = game.PlaceId == 140409475718339
 
--- Queue THIS script to re-run after server teleport.
--- Strategy: save ourselves to disk on first run, then reload from disk after teleport.
--- Fallback: load from GitHub if disk save unavailable.
+-- ════════════════════════════════════════════════════════
+-- QUEUE ON TELEPORT — always active, any PlaceId
+-- The same script re-runs after every server transfer.
+-- isMainPlace is re-evaluated each time from game.PlaceId,
+-- so the correct tab layout (Main vs Autofarm) loads automatically.
+-- ════════════════════════════════════════════════════════
 do
     local qot = queue_on_teleport or queueonteleport or (syn and syn.queue_on_teleport)
-    if isMainPlace and qot then
+    if qot then
         local SCRIPT_PATH = "ZXCHUB_Scripts/AnimeApocalypse.lua"
         local saved = false
 
-        -- Attempt to grab current script source and write to disk
+        -- Try to grab this script's source and cache it to disk so the
+        -- reload after teleport doesn't need an internet connection.
         pcall(function()
-            local src = nil
-            -- Try common executor APIs for getting the running script's source
+            local src
             if getscriptcontent then
                 src = getscriptcontent(script)
             elseif decompile then
@@ -41,10 +64,10 @@ do
 
         pcall(function()
             if saved and readfile and isfile and isfile(SCRIPT_PATH) then
-                -- Reload from local file (guaranteed to be this exact script)
+                -- Reload from local cache (always has this exact build)
                 qot('loadstring(readfile("' .. SCRIPT_PATH .. '"))()')
             else
-                -- Fallback: fetch from GitHub (user must upload script there)
+                -- Fallback: fetch fresh copy from GitHub
                 qot('loadstring(game:HttpGet("https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Anime%20Apocalypse"))()')
             end
         end)
@@ -196,7 +219,8 @@ local FeatureGuards = {}
 -- CONFIG SYSTEM
 -- ════════════════════════════════════════════════════════
 local Flags, Setters = {}, {}
-local GameID = tostring(game.GameId ~= 0 and game.GameId or game.PlaceId)
+-- Use PlaceId so the lobby and each game place each get their own config folder
+local GameID = tostring(game.PlaceId)
 
 local ConfigManager = {
     BaseFolder = "ZXCHUB_Configs",
@@ -965,10 +989,13 @@ end
 -- ════════════════════════════════════════════════════════
 -- AUTOFARM STATE
 -- ════════════════════════════════════════════════════════
-local AF_Enabled   = false
-local AF_Distance  = 20
-local AF_Position  = "Above"
-local AF_lastVTime = 0
+local AF_Enabled       = false
+local AF_Distance      = 20
+local AF_Position      = "Above"
+local AF_SlotCycle     = false   -- cycle loadout slots 1→5 independently from skill spam
+local PP_Enabled       = false   -- ProximityPrompt auto-trigger
+local AF_LastSkillTime = 0       -- tick() of last Z/X/C/G/V/E keypress cycle
+local AF_LastSlotTime  = 0       -- tick() of last slot-switch keypress
 
 -- ── Helpers ──────────────────────────────────────────────
 
@@ -986,66 +1013,63 @@ local function GetAbilityName()
     return v:match('"([^"]+)"') or v:match("%[\"(.-)\"")  or v:match("^%S+$") or "Spin"
 end
 
-local function GetHUD()
-    local pg = lp:FindFirstChild("PlayerGui")
-    local hud = pg and pg:FindFirstChild("HUD")
-    return hud and hud:FindFirstChild("Main")
+-- ── Windows virtual-key codes ─────────────────────────────
+-- Skill keys: Z X C G V E
+local VK_Z=0x5A; local VK_X=0x58; local VK_C=0x43
+local VK_G=0x47; local VK_V=0x56; local VK_E=0x45
+local AF_SKILL_VKS = {VK_Z, VK_X, VK_C, VK_G, VK_V, VK_E}
+-- Slot-switch keys: 1 2 3 4 5
+local VK_SLOTS = {0x31, 0x32, 0x33, 0x34, 0x35}
+
+-- Press and immediately release a single key
+local function PressKey(vk)
+    if keypress  then pcall(function() keypress(vk)  end) end
+    task.wait(0.04)
+    if keyrelease then pcall(function() keyrelease(vk) end) end
 end
 
-local function UltReady()
-    local ok, s = pcall(function()
-        return GetHUD().Ultimate.Progress.Fill.Size.X.Scale
-    end)
-    return ok and s >= 0.930
-end
-
-local function AbilityReady(key)
-    local ok, s = pcall(function()
-        return GetHUD().AbilityHotbar[key].CD.Size.X.Scale
-    end)
-    -- CD bar = cooldown remaining; near 0 means ability is ready (no cooldown showing)
-    if not ok then return true end
-    return s <= 0.05
-end
-
-local function GadgetReady()
-    local ok, s = pcall(function()
-        return GetHUD().Profile.Gadget.Fill.Size.X.Scale
-    end)
-    return ok and s >= 0.944
-end
-
-local function FireAbility(slot)
-    local ev = GetInteract()
-    if not ev then return end
-    local ab = GetAbilityName()
-    pcall(function() ev:FireServer("Ability", slot, "Slot2", ab, "Began") end)
-end
-
-local function FireGadget()
-    local ev = GetInteract()
-    if not ev then return end
-    pcall(function() ev:FireServer("Gadget", "Slot1", "Infinity", "Began") end)
-end
-
--- FuncInteract remote used for EquipAbility (slot cycling during cooldown)
+-- FuncInteract remote — used as slot-switch fallback when keypress unavailable
 local function GetFuncInteract()
     return RS:FindFirstChild("Assets")
         and RS.Assets:FindFirstChild("Requests")
         and RS.Assets.Requests:FindFirstChild("FuncInteract")
 end
 
--- Fire every ability slot at once (used during cooldown cycling)
-local function FireAllSkills()
+-- RemoteEvent skill fallback — used when keypress is unavailable
+local function FireAllSkillsRemote()
     local ev = GetInteract()
     if not ev then return end
     local ab = GetAbilityName()
-    pcall(function() ev:FireServer("Ability", 5, "Slot2", ab, "Began") end)
     pcall(function() ev:FireServer("Ability", 1, "Slot2", ab, "Began") end)
     pcall(function() ev:FireServer("Ability", 2, "Slot2", ab, "Began") end)
     pcall(function() ev:FireServer("Ability", 3, "Slot2", ab, "Began") end)
     pcall(function() ev:FireServer("Ability", 4, "Slot2", ab, "Began") end)
+    pcall(function() ev:FireServer("Ability", 5, "Slot2", ab, "Began") end)
     pcall(function() ev:FireServer("Gadget",  "Slot1", "Infinity", "Began") end)
+end
+
+-- Fire all skills: keypress Z/X/C/G/V/E if executor supports it, else RemoteEvent
+local function DoSkills()
+    if keypress and keyrelease then
+        for _, vk in ipairs(AF_SKILL_VKS) do
+            PressKey(vk)  -- ~0.04s each → ~0.24s total for 6 keys
+        end
+    else
+        FireAllSkillsRemote()
+    end
+end
+
+-- Switch to the next loadout slot: press 1-5 key, else EquipAbility remote
+local function DoSlotSwitch()
+    AF_EquipSlot = (AF_EquipSlot % 5) + 1
+    if keypress and keyrelease then
+        PressKey(VK_SLOTS[AF_EquipSlot])
+    else
+        local fi = GetFuncInteract()
+        if fi then
+            pcall(function() fi:InvokeServer("EquipAbility", "Slot" .. AF_EquipSlot) end)
+        end
+    end
 end
 
 local function FireGates()
@@ -1079,13 +1103,9 @@ local function FindTarget()
     return nil
 end
 
-local AF_AllCooldown   = false  -- true when every skill is on cooldown
-local AF_WaitDist      = 150    -- random distance used while waiting
 local AF_ShieldActive  = false  -- true while shield pause is running
 local AF_ShieldEndTime = 0      -- tick() when shield pause expires
-local AF_LastReadyTime = tick() -- last time any skill was detected as ready
-local AF_EquipSlot     = 1      -- current loadout slot being cycled (1-5)
-local AF_LastEquipTime = 0      -- tick() of last EquipAbility invoke
+local AF_EquipSlot = 1  -- current loadout slot (1-5), cycled by DoSlotSwitch
 
 local function DoTeleport(target, distOverride)
     local char = lp.Character
@@ -1110,13 +1130,17 @@ local function DoTeleport(target, distOverride)
 end
 
 -- ════════════════════════════════════════════════════════
--- AUTOFARM LOOPS
+-- AUTOFARM LOOPS + PROXIMITYPROMPT
+-- Only start in game places — never in the main lobby.
 -- ════════════════════════════════════════════════════════
+if not isMainPlace then
 
-lp.CharacterAdded:Connect(function()
-    task.wait(5)
-    if AF_Enabled then FireGates() end
-end)
+if lp then
+    lp.CharacterAdded:Connect(function()
+        task.wait(5)
+        if AF_Enabled then FireGates() end
+    end)
+end
 
 -- Gates every 10 seconds
 task.spawn(function()
@@ -1134,14 +1158,6 @@ end)
 
 -- Current target shared between Heartbeat and skill loop
 local AF_CurrentTarget = nil
-
-local function AnySkillReady()
-    return UltReady()
-        or AbilityReady("Z")
-        or AbilityReady("X")
-        or AbilityReady("C")
-        or GadgetReady()
-end
 
 -- Returns true if the player currently has a Shield effect on their character
 local function HasShield()
@@ -1166,7 +1182,6 @@ RunService.Heartbeat:Connect(function()
     local hrp = AF_CurrentTarget.hrp
     if not hrp or not hrp.Parent then
         AF_CurrentTarget = nil
-        AF_AllCooldown   = false
         return
     end
 
@@ -1194,70 +1209,127 @@ RunService.Heartbeat:Connect(function()
         end
     end
 
-    -- ── Cooldown distance logic ────────────────────────────
-    local ready = AnySkillReady()
-    if ready then
-        AF_LastReadyTime = tick()
-        if AF_AllCooldown then AF_AllCooldown = false end
-    else
-        -- Only enter cooldown mode after 2s of no ready skills (avoids flapping)
-        if not AF_AllCooldown and tick() - AF_LastReadyTime >= 2 then
-            AF_AllCooldown = true
-            AF_WaitDist    = math.random(100, 200)
-        end
-    end
-
-    local dist = AF_AllCooldown and AF_WaitDist or AF_Distance
-    pcall(function() DoTeleport(AF_CurrentTarget, dist) end)
+    pcall(function() DoTeleport(AF_CurrentTarget, AF_Distance) end)
 end)
 
--- Skill loop (0.1s): update target + fire skills / cycle loadout slots
+-- Main autofarm loop (0.1 s tick)
+-- • Skills  — Z X C G V E keypresses every ~0.5 s (always when AF_Enabled)
+-- • Slots   — 1/2/3/4/5 keypresses every ~0.4 s (only when AF_SlotCycle enabled)
+-- • Target  — FindTarget() every tick so Heartbeat always has a fresh position
 task.spawn(function()
     while true do
         task.wait(0.1)
         if not AF_Enabled then
             AF_CurrentTarget = nil
-            AF_AllCooldown   = false
-            AF_LastReadyTime = tick()
             continue
         end
 
-        AF_CurrentTarget = FindTarget()
-        if not AF_CurrentTarget then continue end
+        AF_CurrentTarget = FindTarget()  -- used by Heartbeat for teleport
 
-        if AF_AllCooldown then
-            -- All skills on cooldown: cycle loadout slots (Slot1→2→3→4→5→1→…)
-            -- and fire everything — different slots may have different ready skills
-            local now = tick()
-            if now - AF_LastEquipTime >= 0.4 then
-                AF_LastEquipTime = now
-                AF_EquipSlot = (AF_EquipSlot % 5) + 1
-                local fi = GetFuncInteract()
-                if fi then
-                    pcall(function()
-                        fi:InvokeServer("EquipAbility", "Slot" .. AF_EquipSlot)
-                    end)
-                end
-                task.wait(0.12)  -- brief pause for equip to register server-side
-                FireAllSkills()
-            end
-        else
-            -- Normal: fire only ready skills
-            if UltReady()        then FireAbility(5) end
-            if AbilityReady("Z") then FireAbility(1) end
-            if AbilityReady("X") then FireAbility(2) end
-            if AbilityReady("C") then FireAbility(3) end
-            if GadgetReady()     then FireGadget()   end
+        local now = tick()
+
+        -- Skills: press Z X C G V E every 0.5 s regardless of target or slot state
+        if now - AF_LastSkillTime >= 0.5 then
+            AF_LastSkillTime = now
+            task.spawn(DoSkills)  -- spawn so 6 key-presses don't block the 0.1 s loop
         end
 
-        -- V (slot 4) fires on a 60s timer regardless of cooldown state
-        local now2 = tick()
-        if now2 - AF_lastVTime >= 60 then
-            FireAbility(4)
-            AF_lastVTime = now2
+        -- Slot cycling: independent toggle — switch slot every 0.4 s
+        if AF_SlotCycle and now - AF_LastSlotTime >= 0.4 then
+            AF_LastSlotTime = now
+            task.spawn(DoSlotSwitch)
         end
     end
 end)
+
+-- ════════════════════════════════════════════════════════
+-- PROXIMITYPROMPT AUTO-TRIGGER
+-- ════════════════════════════════════════════════════════
+
+-- Returns the world position of any ProximityPrompt's parent (BasePart / Model / Attachment)
+local function GetPromptPos(prompt)
+    local pos
+    pcall(function()
+        local p = prompt.Parent
+        if p:IsA("Attachment") then
+            pos = p.WorldPosition
+        elseif p:IsA("BasePart") then
+            pos = p.Position
+        elseif p:IsA("Model") then
+            local bp = p.PrimaryPart or p:FindFirstChildWhichIsA("BasePart")
+            pos = bp and bp.Position or p:GetPivot().Position
+        end
+    end)
+    return pos
+end
+
+local function TriggerPrompt(prompt)
+    local char = lp and lp.Character
+    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local pos = GetPromptPos(prompt)
+    if not pos then return end
+
+    if fireproximityprompt then
+        -- Executor supports native trigger: teleport within range, then fire directly
+        pcall(function() hrp.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0)) end)
+        task.wait(0.08)
+        pcall(function() fireproximityprompt(prompt) end)
+    else
+        -- Fallback: teleport + cut HoldDuration to 0.1s + lock camera + hold E for 0.5s
+        local origHold    = prompt.HoldDuration
+        local cam         = workspace.CurrentCamera
+        local origCamType = cam.CameraType
+
+        pcall(function()
+            hrp.CFrame          = CFrame.new(pos + Vector3.new(0, 3, 0))
+            task.wait(0.08)
+            prompt.HoldDuration = 0.1
+            cam.CameraType      = Enum.CameraType.Scriptable
+            cam.CFrame          = CFrame.new(hrp.Position, pos)
+        end)
+
+        -- Hold E (Windows virtual-key 0x45) for 0.5 s
+        if keypress and keyrelease then
+            pcall(function() keypress(0x45) end)
+            task.wait(0.5)
+            pcall(function() keyrelease(0x45) end)
+        else
+            task.wait(0.5)
+        end
+
+        -- Restore original values
+        pcall(function()
+            prompt.HoldDuration = origHold
+            cam.CameraType      = origCamType
+        end)
+    end
+
+    task.wait(0.15)  -- small gap between consecutive prompts
+end
+
+-- Loop: every 5 s collect every enabled ProximityPrompt in workspace and trigger each one
+task.spawn(function()
+    while true do
+        task.wait(5)
+        if not PP_Enabled then continue end
+
+        local prompts = {}
+        for _, v in ipairs(workspace:GetDescendants()) do
+            if v:IsA("ProximityPrompt") and v.Enabled then
+                table.insert(prompts, v)
+            end
+        end
+
+        for _, prompt in ipairs(prompts) do
+            if not PP_Enabled then break end
+            pcall(function() TriggerPrompt(prompt) end)
+        end
+    end
+end)
+
+end -- if not isMainPlace  (autofarm + PP loops)
 
 -- ════════════════════════════════════════════════════════
 -- TAB 1 — AUTOFARM  (non-lobby place)
@@ -1274,6 +1346,14 @@ if not isMainPlace then
         AF_Enabled = v
         if v then FireGates(); Toast("Autofarm","Started — Gates fired","ok")
         else Toast("Autofarm","Stopped","err") end
+    end)
+    y1 = MakeToggle(Col1, "Cycle Slots (1→2→3→4→5)", y1, "AutofarmSlotCycle", function(v)
+        AF_SlotCycle = v
+        Toast("Autofarm", v and "Slot cycling ON" or "Slot cycling OFF", v and "ok" or "warn")
+    end)
+    y1 = MakeToggle(Col1, "Auto ProximityPrompts", y1, "AutoProxPrompt", function(v)
+        PP_Enabled = v
+        Toast("Autofarm", v and "ProximityPrompts: ON" or "ProximityPrompts: OFF", v and "ok" or "warn")
     end)
 
     y1 = MakeSection(Col1, "Settings", y1)
