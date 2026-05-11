@@ -10,12 +10,43 @@ local lp          = Players.LocalPlayer
 -- True when running in the lobby/matchmaking place
 local isMainPlace = game.PlaceId == 140409475718339
 
--- Queue the main game script to run after server teleport
+-- Queue THIS script to re-run after server teleport.
+-- Strategy: save ourselves to disk on first run, then reload from disk after teleport.
+-- Fallback: load from GitHub if disk save unavailable.
 do
     local qot = queue_on_teleport or queueonteleport or (syn and syn.queue_on_teleport)
     if isMainPlace and qot then
+        local SCRIPT_PATH = "ZXCHUB_Scripts/AnimeApocalypse.lua"
+        local saved = false
+
+        -- Attempt to grab current script source and write to disk
         pcall(function()
-            qot('loadstring(game:HttpGet("https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Anime%20Apocalypse"))()')
+            local src = nil
+            -- Try common executor APIs for getting the running script's source
+            if getscriptcontent then
+                src = getscriptcontent(script)
+            elseif decompile then
+                src = decompile(script)
+            end
+            if src and #src > 500 then
+                if makefolder and not isfolder("ZXCHUB_Scripts") then
+                    makefolder("ZXCHUB_Scripts")
+                end
+                if writefile then
+                    writefile(SCRIPT_PATH, src)
+                    saved = true
+                end
+            end
+        end)
+
+        pcall(function()
+            if saved and readfile and isfile and isfile(SCRIPT_PATH) then
+                -- Reload from local file (guaranteed to be this exact script)
+                qot('loadstring(readfile("' .. SCRIPT_PATH .. '"))()')
+            else
+                -- Fallback: fetch from GitHub (user must upload script there)
+                qot('loadstring(game:HttpGet("https://raw.githubusercontent.com/ZXCHUB/ZXCHUB-MAIN/refs/heads/main/Anime%20Apocalypse"))()')
+            end
         end)
     end
 end
@@ -831,6 +862,8 @@ local function MakeSelect(parent, text, yOff, options, callback)
         local sc2=MakeScroll(pop)
         sc2.Size=UDim2.new(1,-4,1,-4); sc2.Position=UDim2.new(0,2,0,2)
 
+        local overlay  -- pre-declared so item handlers can reference it
+
         for i,opt in ipairs(options) do
             local isSelected = opt==currentVal
             local ib=Btn(sc2,UDim2.new(1,0,0,itemH),UDim2.new(0,0,0,(i-1)*itemH),
@@ -850,10 +883,11 @@ local function MakeSelect(parent, text, yOff, options, callback)
                 bLbl.Text=text.."  :  "..currentVal
                 if callback then callback(opt) end
                 pop:Destroy()
+                if overlay then overlay:Destroy() end
             end)
         end
 
-        local overlay=Btn(GUI,UDim2.new(1,0,1,0),UDim2.new(0,0,0,0),C.bg0)
+        overlay=Btn(GUI,UDim2.new(1,0,1,0),UDim2.new(0,0,0,0),C.bg0)
         overlay.BackgroundTransparency=1; overlay.ZIndex=109
         overlay.MouseButton1Click:Connect(function()
             pop:Destroy(); overlay:Destroy()
@@ -969,7 +1003,9 @@ local function AbilityReady(key)
     local ok, s = pcall(function()
         return GetHUD().AbilityHotbar[key].CD.Size.X.Scale
     end)
-    return ok and s >= 0.5216
+    -- CD bar = cooldown remaining; near 0 means ability is ready (no cooldown showing)
+    if not ok then return true end
+    return s <= 0.05
 end
 
 local function GadgetReady()
@@ -992,6 +1028,26 @@ local function FireGadget()
     pcall(function() ev:FireServer("Gadget", "Slot1", "Infinity", "Began") end)
 end
 
+-- FuncInteract remote used for EquipAbility (slot cycling during cooldown)
+local function GetFuncInteract()
+    return RS:FindFirstChild("Assets")
+        and RS.Assets:FindFirstChild("Requests")
+        and RS.Assets.Requests:FindFirstChild("FuncInteract")
+end
+
+-- Fire every ability slot at once (used during cooldown cycling)
+local function FireAllSkills()
+    local ev = GetInteract()
+    if not ev then return end
+    local ab = GetAbilityName()
+    pcall(function() ev:FireServer("Ability", 5, "Slot2", ab, "Began") end)
+    pcall(function() ev:FireServer("Ability", 1, "Slot2", ab, "Began") end)
+    pcall(function() ev:FireServer("Ability", 2, "Slot2", ab, "Began") end)
+    pcall(function() ev:FireServer("Ability", 3, "Slot2", ab, "Began") end)
+    pcall(function() ev:FireServer("Ability", 4, "Slot2", ab, "Began") end)
+    pcall(function() ev:FireServer("Gadget",  "Slot1", "Infinity", "Began") end)
+end
+
 local function FireGates()
     task.spawn(function()
         local ev = GetInteract()
@@ -999,9 +1055,9 @@ local function FireGates()
         local gFolder = workspace:FindFirstChild("Map")
             and workspace.Map:FindFirstChild("Gates")
         if not gFolder then return end
+        -- Fire all gates simultaneously (no delay)
         for _, gate in ipairs(gFolder:GetChildren()) do
             pcall(function() ev:FireServer("GateHit", gate) end)
-            task.wait(0.15)
         end
     end)
 end
@@ -1027,6 +1083,9 @@ local AF_AllCooldown   = false  -- true when every skill is on cooldown
 local AF_WaitDist      = 150    -- random distance used while waiting
 local AF_ShieldActive  = false  -- true while shield pause is running
 local AF_ShieldEndTime = 0      -- tick() when shield pause expires
+local AF_LastReadyTime = tick() -- last time any skill was detected as ready
+local AF_EquipSlot     = 1      -- current loadout slot being cycled (1-5)
+local AF_LastEquipTime = 0      -- tick() of last EquipAbility invoke
 
 local function DoTeleport(target, distOverride)
     local char = lp.Character
@@ -1138,9 +1197,11 @@ RunService.Heartbeat:Connect(function()
     -- ── Cooldown distance logic ────────────────────────────
     local ready = AnySkillReady()
     if ready then
+        AF_LastReadyTime = tick()
         if AF_AllCooldown then AF_AllCooldown = false end
     else
-        if not AF_AllCooldown then
+        -- Only enter cooldown mode after 2s of no ready skills (avoids flapping)
+        if not AF_AllCooldown and tick() - AF_LastReadyTime >= 2 then
             AF_AllCooldown = true
             AF_WaitDist    = math.random(100, 200)
         end
@@ -1150,21 +1211,38 @@ RunService.Heartbeat:Connect(function()
     pcall(function() DoTeleport(AF_CurrentTarget, dist) end)
 end)
 
--- Skill loop (0.1s): update target + fire skills
+-- Skill loop (0.1s): update target + fire skills / cycle loadout slots
 task.spawn(function()
     while true do
         task.wait(0.1)
         if not AF_Enabled then
             AF_CurrentTarget = nil
             AF_AllCooldown   = false
+            AF_LastReadyTime = tick()
             continue
         end
 
         AF_CurrentTarget = FindTarget()
         if not AF_CurrentTarget then continue end
 
-        -- Fire ready skills (only when at combat distance, not while waiting)
-        if not AF_AllCooldown then
+        if AF_AllCooldown then
+            -- All skills on cooldown: cycle loadout slots (Slot1→2→3→4→5→1→…)
+            -- and fire everything — different slots may have different ready skills
+            local now = tick()
+            if now - AF_LastEquipTime >= 0.4 then
+                AF_LastEquipTime = now
+                AF_EquipSlot = (AF_EquipSlot % 5) + 1
+                local fi = GetFuncInteract()
+                if fi then
+                    pcall(function()
+                        fi:InvokeServer("EquipAbility", "Slot" .. AF_EquipSlot)
+                    end)
+                end
+                task.wait(0.12)  -- brief pause for equip to register server-side
+                FireAllSkills()
+            end
+        else
+            -- Normal: fire only ready skills
             if UltReady()        then FireAbility(5) end
             if AbilityReady("Z") then FireAbility(1) end
             if AbilityReady("X") then FireAbility(2) end
@@ -1172,11 +1250,11 @@ task.spawn(function()
             if GadgetReady()     then FireGadget()   end
         end
 
-        -- V fires on timer regardless of cooldown state
-        local now = tick()
-        if now - AF_lastVTime >= 60 then
+        -- V (slot 4) fires on a 60s timer regardless of cooldown state
+        local now2 = tick()
+        if now2 - AF_lastVTime >= 60 then
             FireAbility(4)
-            AF_lastVTime = now
+            AF_lastVTime = now2
         end
     end
 end)
@@ -1260,6 +1338,7 @@ if isMainPlace then
             if py+popH>vp.Y-4 then py=ap.Y-popH-4 end
             pop.Position=UDim2.new(0,px,0,py)
             local sc=MakeScroll(pop); sc.Size=UDim2.new(1,-4,1,-4); sc.Position=UDim2.new(0,2,0,2)
+            local ov  -- pre-declared so item handlers can reference it
             for i,opt in ipairs(opts) do
                 local sel=opt==AS_Map
                 local ib=Btn(sc,UDim2.new(1,0,0,itemH),UDim2.new(0,0,0,(i-1)*itemH),sel and C.bg4 or C.bg3)
@@ -1270,10 +1349,12 @@ if isMainPlace then
                 local iL=Lbl(ib,opt,isMobile and 12 or 11,sel and C.white or C.txt,Enum.Font.GothamMedium)
                 iL.Size=UDim2.new(1,-(dSz+24),1,0); iL.Position=UDim2.new(0,dSz+18,0,0)
                 ib.MouseButton1Click:Connect(function()
-                    AS_Map=opt; AS_MapLbl.Text="Map  :  "..AS_Map; pop:Destroy()
+                    AS_Map=opt; AS_MapLbl.Text="Map  :  "..AS_Map
+                    pop:Destroy()
+                    if ov then ov:Destroy() end
                 end)
             end
-            local ov=Btn(GUI,UDim2.new(1,0,1,0),UDim2.new(0,0,0,0),C.bg0)
+            ov=Btn(GUI,UDim2.new(1,0,1,0),UDim2.new(0,0,0,0),C.bg0)
             ov.BackgroundTransparency=1; ov.ZIndex=109
             ov.MouseButton1Click:Connect(function() pop:Destroy(); ov:Destroy() end)
         end)
