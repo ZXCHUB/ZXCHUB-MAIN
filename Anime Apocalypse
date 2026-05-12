@@ -994,7 +994,6 @@ local AF_Distance      = 20
 local AF_Position      = "Above"
 local AF_SwapAbility = false  -- cycle Slot1-5 when all Z/X/C/G/E are on cooldown
 local PP_Enabled     = false  -- ProximityPrompt auto-trigger
-local AF_AutoRetry   = false  -- fire "PlayAgain" after each ProximityPrompt activation
 local AF_LastVTime   = 0      -- tick() of last V-skill fire (60 s timer)
 local AF_CurrentSlot = 1      -- active loadout slot for swap cycling (1-5)
 
@@ -1404,16 +1403,6 @@ task.spawn(function()
             pcall(function() TriggerPrompt(prompt) end)
         end
 
-        -- After ALL prompts have been activated, wait 10 s then fire PlayAgain once
-        if AF_AutoRetry and PP_Enabled then
-            task.delay(10, function()
-                if not AF_AutoRetry then return end
-                pcall(function()
-                    local ev = GetInteract()
-                    if ev then ev:FireServer("PlayAgain") end
-                end)
-            end)
-        end
     end
 end)
 
@@ -1444,11 +1433,6 @@ if not isMainPlace then
         PP_Enabled = v
         Toast("Autofarm", v and "ProximityPrompts: ON" or "ProximityPrompts: OFF", v and "ok" or "warn")
     end)
-    y1 = MakeToggle(Col1, "Auto Retry (PlayAgain)", y1, "AutoRetry", function(v)
-        AF_AutoRetry = v
-        Toast("Autofarm", v and "Auto Retry: ON" or "Auto Retry: OFF", v and "ok" or "warn")
-    end)
-
     y1 = MakeSection(Col1, "Settings", y1)
     y1 = MakeLabel(Col1, "Gates every 10s. On respawn: 5s delay then gates.", y1, C.txt3)
     y1 = MakeSlider(Col1, "Distance", y1, "AutofarmDistance", 10, 100, "%d", function(v)
@@ -1535,71 +1519,34 @@ if isMainPlace then
     end
 
     -- ── AutoStart loop ───────────────────────────────────
-    local MATCH_COLOR = Color3.fromRGB(26, 155, 255)
-    local AS_fired    = false  -- prevent double-firing per color change
-
+    -- Constantly spams CreateMatch when AS_Enabled is on.
+    -- Tries every platform in workspace.Platforms until one accepts.
     task.spawn(function()
         while true do
             task.wait(0.5)
-            if not AS_Enabled then AS_fired = false; continue end
+            if not AS_Enabled then continue end
 
             local ev = RS:FindFirstChild("Assets")
                 and RS.Assets:FindFirstChild("Remotes")
                 and RS.Assets.Remotes:FindFirstChild("Interact")
+            if not ev then continue end
 
-            if ev then
-                -- FireServer path: watch for blue color on platform outline
-                local ok, col = pcall(function()
-                    return workspace.Platforms:GetChildren()[2].Outlines:GetChildren()[3].Color
+            local ok, platforms = pcall(function()
+                return workspace.Platforms:GetChildren()
+            end)
+            if not ok or not platforms then continue end
+
+            for _, platform in ipairs(platforms) do
+                pcall(function()
+                    ev:FireServer("CreateMatch", platform, {
+                        IsTaken     = true,
+                        Difficulty  = AS_Mode == "Survival" and AS_Difficulty or "Normal",
+                        Map         = AS_Map,
+                        Mode        = AS_Mode,
+                        FriendsOnly = AS_FriendsOnly,
+                        MaxPlayers  = AS_MaxPlayers,
+                    })
                 end)
-                if ok and col == MATCH_COLOR then
-                    if not AS_fired then
-                        AS_fired = true
-                        pcall(function()
-                            ev:FireServer("CreateMatch",
-                                workspace.Platforms:GetChildren()[2],
-                                {
-                                    IsTaken     = true,
-                                    Difficulty  = AS_Mode == "Survival" and AS_Difficulty or "Normal",
-                                    Map         = AS_Map,
-                                    Mode        = AS_Mode,
-                                    FriendsOnly = AS_FriendsOnly,
-                                    MaxPlayers  = AS_MaxPlayers,
-                                }
-                            )
-                        end)
-                        Toast("AutoStart","CreateMatch fired","ok")
-                    end
-                else
-                    AS_fired = false  -- color changed back, allow next fire
-                end
-            else
-                -- Fallback: find a platform with players in queue, teleport to its hitbox
-                local ok2, platforms = pcall(function() return workspace.Platforms:GetChildren() end)
-                if ok2 then
-                    for _, platform in ipairs(platforms) do
-                        local queue = platform:FindFirstChild("PlayersInQueue")
-                        if queue and #queue:GetChildren() > 0 then
-                            local ok3, hitbox = pcall(function()
-                                return platform.Hitboxes:GetChildren()[5]
-                            end)
-                            if ok3 and hitbox then
-                                local char = lp.Character
-                                local hrp  = char and char:FindFirstChild("HumanoidRootPart")
-                                if hrp then
-                                    pcall(function() hrp.CFrame = hitbox.CFrame end)
-                                    -- Wait 20s; if still here, retry
-                                    task.delay(20, function()
-                                        if AS_Enabled and game.PlaceId == 140409475718339 then
-                                            AS_fired = false  -- triggers re-search next loop
-                                        end
-                                    end)
-                                end
-                            end
-                            break
-                        end
-                    end
-                end
             end
         end
     end)
