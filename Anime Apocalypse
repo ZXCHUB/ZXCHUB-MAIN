@@ -1588,26 +1588,43 @@ if isMainPlace then
     local AS_wasEnabled = false
     local AS_NextFire   = 0  -- tick() when next fire is allowed
 
+    -- Returns true if fired, false if all platforms are occupied (retry in 5s)
     local function DoCreateMatch()
         local ev = RS:FindFirstChild("Assets")
             and RS.Assets:FindFirstChild("Remotes")
             and RS.Assets.Remotes:FindFirstChild("Interact")
-        if not ev then return end
+        if not ev then return false end
+
         local ok, platforms = pcall(function() return workspace.Platforms:GetChildren() end)
-        if not ok or not platforms then return end
+        if not ok or not platforms then return false end
+
+        -- Find first platform with an empty PlayersInQueue folder
+        local freePlatform = nil
         for _, platform in ipairs(platforms) do
-            pcall(function()
-                ev:FireServer("CreateMatch", platform, {
-                    IsTaken     = true,
-                    Difficulty  = AS_Mode == "Survival" and AS_Difficulty or "Normal",
-                    Map         = AS_Map,
-                    Mode        = AS_Mode,
-                    FriendsOnly = AS_FriendsOnly,
-                    MaxPlayers  = AS_MaxPlayers,
-                })
-            end)
+            local piq = platform:FindFirstChild("PlayersInQueue")
+            if piq and #piq:GetChildren() == 0 then
+                freePlatform = platform
+                break
+            end
         end
+
+        if not freePlatform then
+            Toast("AutoStart", "All platforms busy, retry in 5s", "warn")
+            return false
+        end
+
+        pcall(function()
+            ev:FireServer("CreateMatch", freePlatform, {
+                IsTaken     = true,
+                Difficulty  = AS_Mode == "Survival" and AS_Difficulty or "Normal",
+                Map         = AS_Map,
+                Mode        = AS_Mode,
+                FriendsOnly = AS_FriendsOnly,
+                MaxPlayers  = AS_MaxPlayers,
+            })
+        end)
         Toast("AutoStart", "CreateMatch fired", "ok")
+        return true
     end
 
     task.spawn(function()
@@ -1622,10 +1639,11 @@ if isMainPlace then
                 AS_wasEnabled = true
                 AS_NextFire   = tick() + AS_StartDelay
             end
-            -- Fire when timer expires, then reset to 30s interval
+            -- Fire when timer expires
             if tick() >= AS_NextFire then
-                AS_NextFire = tick() + 30
-                task.spawn(DoCreateMatch)
+                local success = DoCreateMatch()
+                -- If all platforms busy → retry in 5s, otherwise normal 30s interval
+                AS_NextFire = tick() + (success and 30 or 5)
             end
         end
     end)
@@ -1709,7 +1727,12 @@ if isMainPlace then
         Setters["AS_Map"] = function(v)
             AS_Map = v; Flags["AS_Map"] = v
             if AS_MapLbl then AS_MapLbl.Text = "Map  :  "..v end
-            rowDiff.Visible = true  -- cascade on config load
+            -- Cascade on config load: Difficulty only for Survival
+            if AS_Mode == "Survival" then
+                rowDiff.Visible = true
+            else
+                rowFriends.Visible = true
+            end
         end
         b.MouseButton1Click:Connect(function()
             local opts = MapOptions[AS_Mode] or {"Shibuya"}
@@ -1736,7 +1759,13 @@ if isMainPlace then
                 iL.Size=UDim2.new(1,-(dSz+24),1,0); iL.Position=UDim2.new(0,dSz+18,0,0)
                 ib.MouseButton1Click:Connect(function()
                     AS_Map=opt; Flags["AS_Map"]=opt; AS_MapLbl.Text="Map  :  "..AS_Map
-                    hideFrom(3); rowDiff.Visible = true
+                    hideFrom(3)
+                    -- Show Difficulty only for Survival mode
+                    if AS_Mode == "Survival" then
+                        rowDiff.Visible = true
+                    else
+                        rowFriends.Visible = true
+                    end
                     pop:Destroy(); if ov then ov:Destroy() end
                 end)
             end
