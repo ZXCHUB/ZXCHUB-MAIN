@@ -856,17 +856,31 @@ local function MakeInput(parent, text, placeholder, yOff, flag, callback)
     return yOff+(isMobile and 54 or 48), box
 end
 
-local function MakeSelect(parent, text, yOff, options, callback)
+-- flag is optional: if provided, value is saved to Flags[flag] and can be loaded by Config
+local function MakeSelect(parent, text, yOff, options, callback, flag)
     local bH=isMobile and 30 or 26
     local b=Btn(parent,UDim2.new(1,-32,0,bH),UDim2.new(0,16,0,yOff),C.bg3,4)
     Stroke(b,C.brd2,1)
 
-    local currentVal = options[1] or ""
+    -- Restore from Flags if we have a flag and a saved value that's valid
+    local savedVal = flag and Flags[flag]
+    local currentVal = (savedVal and table.find(options, savedVal)) and savedVal or (options[1] or "")
+    if flag then Flags[flag] = currentVal end
 
     local bLbl=Lbl(b,text.."  :  "..currentVal,isMobile and 11 or 11,C.txt,Enum.Font.GothamMedium,Enum.TextXAlignment.Left)
     bLbl.Size=UDim2.new(1,-28,1,0); bLbl.Position=UDim2.new(0,10,0,0)
     local arrow=Lbl(b,"v",isMobile and 10 or 9,C.txt2,Enum.Font.GothamBold,Enum.TextXAlignment.Right)
     arrow.Size=UDim2.new(0,20,1,0); arrow.Position=UDim2.new(1,-22,0,0)
+
+    if flag then
+        Setters[flag] = function(v)
+            if not table.find(options, v) then return end
+            currentVal = v
+            Flags[flag] = v
+            bLbl.Text = text.."  :  "..currentVal
+            if callback then callback(v) end
+        end
+    end
 
     b.MouseButton1Click:Connect(function()
         local popW  = isMobile and math.min(260, workspace.CurrentCamera.ViewportSize.X-20) or 240
@@ -904,6 +918,7 @@ local function MakeSelect(parent, text, yOff, options, callback)
 
             ib.MouseButton1Click:Connect(function()
                 currentVal=opt
+                if flag then Flags[flag]=opt end
                 bLbl.Text=text.."  :  "..currentVal
                 if callback then callback(opt) end
                 pop:Destroy()
@@ -1155,7 +1170,14 @@ local function FindTarget()
     if not folder then return nil end
     for _, child in ipairs(folder:GetChildren()) do
         if child:IsA("Model") then
+            -- Skip dead NPCs (Config.Health.Value == 0)
+            local hp = child:FindFirstChild("Config")
+                and child.Config:FindFirstChild("Health")
+            if hp and hp.Value <= 0 then continue end
+            -- HumanoidRootPart → PrimaryPart → any BasePart (handles simple models too)
             local hrp = child:FindFirstChild("HumanoidRootPart")
+                or child.PrimaryPart
+                or child:FindFirstChildWhichIsA("BasePart")
             if hrp then
                 return {hrp = hrp, model = child}
             end
@@ -1197,8 +1219,33 @@ end
 -- ════════════════════════════════════════════════════════
 if not isMainPlace then
 
+-- Hold W (move forward) for `duration` seconds using Humanoid:Move
+-- Works without window focus (no keypress needed)
+local function HoldW(duration)
+    task.spawn(function()
+        local deadline = tick() + duration
+        while tick() < deadline do
+            task.wait(0.05)
+            local char = lp.Character
+            local hum  = char and char:FindFirstChildOfClass("Humanoid")
+            if hum and hum.Health > 0 then
+                hum:Move(Vector3.new(0, 0, -1), true)
+            end
+        end
+        -- Release W
+        local char = lp.Character
+        local hum  = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then hum:Move(Vector3.new(0, 0, 0), false) end
+    end)
+end
+
+-- Hold W on initial load
+HoldW(10)
+
 if lp then
     lp.CharacterAdded:Connect(function()
+        -- Hold W for 10s every time player respawns
+        HoldW(10)
         task.wait(5)
         if AF_Enabled then FireGates() end
     end)
@@ -1442,7 +1489,7 @@ if not isMainPlace then
     y1 = MakeSelect(Col1, "Farm Position", y1, {"Above","Below","Behind"}, function(v)
         AF_Position = v
         Toast("Autofarm","Position: "..v,"ok")
-    end)
+    end, "AF_Position")
 
     y1 = MakeSection(Col1, "Manual", y1)
     y1 = MakeActionBtn(Col1, "Fire Gates Now", y1, function()
@@ -1473,12 +1520,20 @@ if isMainPlace then
 
     -- Dynamic map select: options re-evaluated from AS_Mode at popup time
     local AS_MapLbl
+    -- Restore AS_Map from saved config if available
+    if Flags["AS_Map"] then AS_Map = Flags["AS_Map"] end
     local function MakeDynMapSelect(parent, yOff)
         local bH = isMobile and 30 or 26
         local b  = Btn(parent, UDim2.new(1,-32,0,bH), UDim2.new(0,16,0,yOff), C.bg3, 4)
         Stroke(b, C.brd2, 1)
+        Flags["AS_Map"] = AS_Map  -- ensure it's in Flags from the start
         AS_MapLbl = Lbl(b,"Map  :  "..AS_Map, isMobile and 11 or 11, C.txt, Enum.Font.GothamMedium)
         AS_MapLbl.Size=UDim2.new(1,-28,1,0); AS_MapLbl.Position=UDim2.new(0,10,0,0)
+        -- Register setter so Load Config can restore the map
+        Setters["AS_Map"] = function(v)
+            AS_Map = v; Flags["AS_Map"] = v
+            if AS_MapLbl then AS_MapLbl.Text = "Map  :  "..v end
+        end
         Lbl(b,"v",isMobile and 10 or 9,C.txt2,Enum.Font.GothamBold,Enum.TextXAlignment.Right).Size=UDim2.new(0,20,1,0)
         b.MouseButton1Click:Connect(function()
             local opts = MapOptions[AS_Mode] or {"Shibuya"}
@@ -1506,7 +1561,7 @@ if isMainPlace then
                 local iL=Lbl(ib,opt,isMobile and 12 or 11,sel and C.white or C.txt,Enum.Font.GothamMedium)
                 iL.Size=UDim2.new(1,-(dSz+24),1,0); iL.Position=UDim2.new(0,dSz+18,0,0)
                 ib.MouseButton1Click:Connect(function()
-                    AS_Map=opt; AS_MapLbl.Text="Map  :  "..AS_Map
+                    AS_Map=opt; Flags["AS_Map"]=opt; AS_MapLbl.Text="Map  :  "..AS_Map
                     pop:Destroy()
                     if ov then ov:Destroy() end
                 end)
@@ -1571,7 +1626,7 @@ if isMainPlace then
             if AS_MapLbl then AS_MapLbl.Text = "Map  :  "..AS_Map end
         end
         Toast("AutoStart","Mode: "..v,"ok")
-    end)
+    end, "AS_Mode")
 
     y1 = MakeDynMapSelect(Col1, y1)
 
@@ -1581,17 +1636,17 @@ if isMainPlace then
     y1 = MakeSelect(Col1, "Difficulty", y1, {"Normal","Hard","Nightmare","Gravewalker"}, function(v)
         AS_Difficulty = v
         Toast("AutoStart","Difficulty: "..v,"ok")
-    end)
+    end, "AS_Difficulty")
 
     y1 = MakeSelect(Col1, "Friends Only", y1, {"False","True"}, function(v)
         AS_FriendsOnly = v == "True"
         Toast("AutoStart","Friends Only: "..v,"ok")
-    end)
+    end, "AS_FriendsOnly")
 
     y1 = MakeSelect(Col1, "Max Players", y1, {"1","2","3","4","5","6"}, function(v)
         AS_MaxPlayers = tonumber(v)
         Toast("AutoStart","Max Players: "..v,"ok")
-    end)
+    end, "AS_MaxPlayers")
     AS_MaxPlayers = 4
 
     y1 = MakeSection(Col1, "Codes", y1)
