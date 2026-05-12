@@ -1577,34 +1577,48 @@ if isMainPlace then
     end
 
     -- ── AutoStart loop ───────────────────────────────────
-    -- Constantly spams CreateMatch when AS_Enabled is on.
-    -- Tries every platform in workspace.Platforms until one accepts.
+    -- First fire: 10s after enabling. Then every 30s.
+    local AS_wasEnabled = false
+    local AS_NextFire   = 0  -- tick() when next fire is allowed
+
+    local function DoCreateMatch()
+        local ev = RS:FindFirstChild("Assets")
+            and RS.Assets:FindFirstChild("Remotes")
+            and RS.Assets.Remotes:FindFirstChild("Interact")
+        if not ev then return end
+        local ok, platforms = pcall(function() return workspace.Platforms:GetChildren() end)
+        if not ok or not platforms then return end
+        for _, platform in ipairs(platforms) do
+            pcall(function()
+                ev:FireServer("CreateMatch", platform, {
+                    IsTaken     = true,
+                    Difficulty  = AS_Mode == "Survival" and AS_Difficulty or "Normal",
+                    Map         = AS_Map,
+                    Mode        = AS_Mode,
+                    FriendsOnly = AS_FriendsOnly,
+                    MaxPlayers  = AS_MaxPlayers,
+                })
+            end)
+        end
+        Toast("AutoStart", "CreateMatch fired", "ok")
+    end
+
     task.spawn(function()
         while true do
             task.wait(0.5)
-            if not AS_Enabled then continue end
-
-            local ev = RS:FindFirstChild("Assets")
-                and RS.Assets:FindFirstChild("Remotes")
-                and RS.Assets.Remotes:FindFirstChild("Interact")
-            if not ev then continue end
-
-            local ok, platforms = pcall(function()
-                return workspace.Platforms:GetChildren()
-            end)
-            if not ok or not platforms then continue end
-
-            for _, platform in ipairs(platforms) do
-                pcall(function()
-                    ev:FireServer("CreateMatch", platform, {
-                        IsTaken     = true,
-                        Difficulty  = AS_Mode == "Survival" and AS_Difficulty or "Normal",
-                        Map         = AS_Map,
-                        Mode        = AS_Mode,
-                        FriendsOnly = AS_FriendsOnly,
-                        MaxPlayers  = AS_MaxPlayers,
-                    })
-                end)
+            if not AS_Enabled then
+                AS_wasEnabled = false
+                continue
+            end
+            -- Just turned on → schedule first fire in 10s
+            if not AS_wasEnabled then
+                AS_wasEnabled = true
+                AS_NextFire   = tick() + 10
+            end
+            -- Fire when timer expires, then reset to 30s interval
+            if tick() >= AS_NextFire then
+                AS_NextFire = tick() + 30
+                task.spawn(DoCreateMatch)
             end
         end
     end)
