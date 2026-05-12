@@ -1174,8 +1174,9 @@ local function FindTarget()
             local hp = child:FindFirstChild("Config")
                 and child.Config:FindFirstChild("Health")
             if hp and hp.Value <= 0 then continue end
-            -- HumanoidRootPart → PrimaryPart → any BasePart (handles simple models too)
-            local hrp = child:FindFirstChild("HumanoidRootPart")
+            -- Head → HumanoidRootPart → PrimaryPart → any BasePart
+            local hrp = child:FindFirstChild("Head")
+                or child:FindFirstChild("HumanoidRootPart")
                 or child.PrimaryPart
                 or child:FindFirstChildWhichIsA("BasePart")
             if hrp then
@@ -1243,7 +1244,9 @@ end
 HoldW(10)
 
 if lp then
-    lp.CharacterAdded:Connect(function()
+    lp.CharacterAdded:Connect(function(char)
+        -- Wait for character to fully load before doing anything
+        char:WaitForChild("HumanoidRootPart")
         -- Hold W for 10s every time player respawns
         HoldW(10)
         task.wait(5)
