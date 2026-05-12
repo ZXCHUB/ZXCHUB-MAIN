@@ -1009,7 +1009,9 @@ local AF_Distance      = 20
 local AF_Position      = "Above"
 local AF_SwapAbility = false  -- cycle Slot1-5 when all Z/X/C/G/E are on cooldown
 local PP_Enabled     = false  -- ProximityPrompt auto-trigger
-local AF_LastVTime   = 0      -- tick() of last V-skill fire (60 s timer)
+local AF_LastVTime    = 0     -- tick() of last V-skill fire (60 s timer)
+local AF_GadgetFiring = false -- true while Slot1→5 gadget burst is in progress
+local AF_AutoRetry    = false -- watch Revive/EndScreen and fire PlayAgain
 local AF_CurrentSlot = 1      -- active loadout slot for swap cycling (1-5)
 
 -- ── Helpers ──────────────────────────────────────────────
@@ -1042,7 +1044,10 @@ local function GetGadgetName()
     local name = v:match("^(.-)%s+%[") or v  -- everything before " ["
     name = name:gsub("%s+$", "")             -- trim trailing spaces
     if #name == 0 then return "Infinity" end
-    return name:sub(1,1):upper() .. name:sub(2):lower()
+    -- Title-case every word: "TIME STOP" → "Time Stop"
+    return (name:gsub("(%a)([%a']*)", function(first, rest)
+        return first:upper() .. rest:lower()
+    end))
 end
 
 -- ── CD-ready reference sizes (strict equality as requested) ───────────────
@@ -1051,7 +1056,7 @@ local CD_NONE = UDim2.new(1.04299998, -6, -0.800000012, -6)
 -- G  (Ultimate.Progress.Fill.Size when ult ready)
 local ULT_READY = UDim2.new(0.930000007, 0, 0.908999979, 0)
 -- E  (Profile.Gadget.Fill.Size when gadget ready)
-local GADGET_READY = UDim2.new(0.944198668, 0, 1.01564765, 0)
+local GADGET_READY = UDim2.new(0.944000006, 0, 0.908999979, 0)
 
 local function AbilityReady(key)   -- key = "Z" | "X" | "C"
     local ok, sz = pcall(function()
@@ -1116,11 +1121,6 @@ local function FireReadySkills()
         FireAbility(ev, 5, name)
         fired = true
     end
-    if GadgetReady() then
-        pcall(function() ev:FireServer("Gadget", "Slot1", GetGadgetName(), "Began") end)
-        fired = true
-    end
-
     return fired
 end
 
@@ -1205,8 +1205,10 @@ local function DoTeleport(target, distOverride)
         offset = Vector3.new(0, dist, 0)
     elseif AF_Position == "Below" then
         offset = Vector3.new(0, -dist, 0)
+    elseif AF_Position == "Front" then
+        offset = target.hrp.CFrame.LookVector * dist   -- in front of NPC (where it faces)
     elseif AF_Position == "Behind" then
-        offset = target.hrp.CFrame.LookVector * dist
+        offset = -target.hrp.CFrame.LookVector * dist  -- behind the NPC
     else
         offset = Vector3.new(0, dist, 0)
     end
@@ -1242,6 +1244,38 @@ end
 
 -- Hold W on initial load
 HoldW(10)
+
+-- VoteSkipRaid: spam every 1s until first NPC appears in workspace.Zombies
+task.spawn(function()
+    while true do
+        task.wait(1)
+        local folder = workspace:FindFirstChild("Zombies")
+        if folder and #folder:GetChildren() > 0 then break end
+        local ev = GetInteract()
+        if ev then pcall(function() ev:FireServer("VoteSkipRaid") end) end
+    end
+end)
+
+-- Auto Retry: watch Revive / EndScreen visibility and fire PlayAgain
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if not AF_AutoRetry then continue end
+        local reviveVisible = false
+        local endVisible    = false
+        pcall(function()
+            reviveVisible = lp.PlayerGui.HUD.Main.Revive.Visible
+        end)
+        pcall(function()
+            endVisible = lp.PlayerGui.HUD.EndScreen.Visible
+        end)
+        if reviveVisible or endVisible then
+            task.wait(0.5)
+            local ev = GetInteract()
+            if ev then pcall(function() ev:FireServer("PlayAgain") end) end
+        end
+    end
+end)
 
 if lp then
     lp.CharacterAdded:Connect(function(char)
@@ -1343,8 +1377,9 @@ task.spawn(function()
         -- Pause skill firing while the Config tab is open
         if ActiveTab == 2 then continue end
 
-        -- ── V skill: independent 60-second timer ─────────────────
         local now = tick()
+
+        -- ── V skill: independent 60-second timer ─────────────────
         if now - AF_LastVTime >= 60 then
             AF_LastVTime = now
             task.spawn(function()
@@ -1353,6 +1388,24 @@ task.spawn(function()
                     local name = GetAbilityName()
                     FireAbility(ev, 4, name)
                 end
+            end)
+        end
+
+        -- ── Gadget: fires when CD clears (Slot1→Slot5, 0.1s between each) ──
+        if GadgetReady() and not AF_GadgetFiring then
+            AF_GadgetFiring = true
+            task.spawn(function()
+                local ev = GetInteract()
+                if ev then
+                    local name = GetGadgetName()
+                    for slot = 1, 5 do
+                        pcall(function()
+                            ev:FireServer("Gadget", "Slot"..slot, name, "Began")
+                        end)
+                        if slot < 5 then task.wait(0.1) end
+                    end
+                end
+                AF_GadgetFiring = false
             end)
         end
 
@@ -1483,13 +1536,17 @@ if not isMainPlace then
         PP_Enabled = v
         Toast("Autofarm", v and "ProximityPrompts: ON" or "ProximityPrompts: OFF", v and "ok" or "warn")
     end)
+    y1 = MakeToggle(Col1, "Auto Retry (PlayAgain)", y1, "AutoRetry", function(v)
+        AF_AutoRetry = v
+        Toast("Autofarm", v and "Auto Retry: ON" or "Auto Retry: OFF", v and "ok" or "warn")
+    end)
     y1 = MakeSection(Col1, "Settings", y1)
     y1 = MakeLabel(Col1, "Gates every 10s. On respawn: 5s delay then gates.", y1, C.txt3)
     y1 = MakeSlider(Col1, "Distance", y1, "AutofarmDistance", 10, 100, "%d", function(v)
         AF_Distance = v
     end)
     AF_Distance = Flags["AutofarmDistance"] or 20
-    y1 = MakeSelect(Col1, "Farm Position", y1, {"Above","Below","Behind"}, function(v)
+    y1 = MakeSelect(Col1, "Farm Position", y1, {"Above","Below","Front","Behind"}, function(v)
         AF_Position = v
         Toast("Autofarm","Position: "..v,"ok")
     end, "AF_Position")
