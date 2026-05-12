@@ -1066,6 +1066,15 @@ local function AnySkillReady()
         or UltReady() or GadgetReady()
 end
 
+-- Fire one ability on all five slots back-to-back (Slot1 → Slot2 → Slot3 → Slot4 → Slot5)
+local function FireAbility(ev, index, name)
+    pcall(function() ev:FireServer("Ability", index, "Slot1", name, "Began") end)
+    pcall(function() ev:FireServer("Ability", index, "Slot2", name, "Began") end)
+    pcall(function() ev:FireServer("Ability", index, "Slot3", name, "Began") end)
+    pcall(function() ev:FireServer("Ability", index, "Slot4", name, "Began") end)
+    pcall(function() ev:FireServer("Ability", index, "Slot5", name, "Began") end)
+end
+
 -- Fire whichever of Z / X / C / G / E are currently ready.
 -- Returns true if at least one was fired.
 local function FireReadySkills()
@@ -1074,19 +1083,23 @@ local function FireReadySkills()
     local fired = false
 
     if AbilityReady("Z") then
-        pcall(function() ev:FireServer("Ability", 1, "Slot2", GetAbilityName(), "Began") end)
+        local name = GetAbilityName()
+        FireAbility(ev, 1, name)
         fired = true
     end
     if AbilityReady("X") then
-        pcall(function() ev:FireServer("Ability", 2, "Slot2", GetAbilityName(), "Began") end)
+        local name = GetAbilityName()
+        FireAbility(ev, 2, name)
         fired = true
     end
     if AbilityReady("C") then
-        pcall(function() ev:FireServer("Ability", 3, "Slot2", GetAbilityName(), "Began") end)
+        local name = GetAbilityName()
+        FireAbility(ev, 3, name)
         fired = true
     end
     if UltReady() then
-        pcall(function() ev:FireServer("Ability", 5, "Slot2", GetAbilityName(), "Began") end)
+        local name = GetAbilityName()
+        FireAbility(ev, 5, name)
         fired = true
     end
     if GadgetReady() then
@@ -1288,9 +1301,8 @@ task.spawn(function()
             task.spawn(function()
                 local ev = GetInteract()
                 if ev then
-                    pcall(function()
-                        ev:FireServer("Ability", 4, "Slot3", GetAbilityName(), "Began")
-                    end)
+                    local name = GetAbilityName()
+                    FireAbility(ev, 4, name)
                 end
             end)
         end
