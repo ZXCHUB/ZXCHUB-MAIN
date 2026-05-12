@@ -1578,63 +1578,13 @@ if isMainPlace then
         Survival         = {"Shibuya", "Impel Down"},
     }
 
-    -- Dynamic map select: options re-evaluated from AS_Mode at popup time
+    -- AS_MapLbl is assigned when the Map row is built in the UI section below
     local AS_MapLbl
-    -- Restore AS_Map from saved config if available
     if Flags["AS_Map"] then AS_Map = Flags["AS_Map"] end
-    local function MakeDynMapSelect(parent, yOff)
-        local bH = isMobile and 30 or 26
-        local b  = Btn(parent, UDim2.new(1,-32,0,bH), UDim2.new(0,16,0,yOff), C.bg3, 4)
-        Stroke(b, C.brd2, 1)
-        Flags["AS_Map"] = AS_Map  -- ensure it's in Flags from the start
-        AS_MapLbl = Lbl(b,"Map  :  "..AS_Map, isMobile and 11 or 11, C.txt, Enum.Font.GothamMedium)
-        AS_MapLbl.Size=UDim2.new(1,-28,1,0); AS_MapLbl.Position=UDim2.new(0,10,0,0)
-        -- Register setter so Load Config can restore the map
-        Setters["AS_Map"] = function(v)
-            AS_Map = v; Flags["AS_Map"] = v
-            if AS_MapLbl then AS_MapLbl.Text = "Map  :  "..v end
-        end
-        Lbl(b,"v",isMobile and 10 or 9,C.txt2,Enum.Font.GothamBold,Enum.TextXAlignment.Right).Size=UDim2.new(0,20,1,0)
-        b.MouseButton1Click:Connect(function()
-            local opts = MapOptions[AS_Mode] or {"Shibuya"}
-            if not table.find(opts, AS_Map) then
-                AS_Map = opts[1]; AS_MapLbl.Text = "Map  :  "..AS_Map
-            end
-            local popW  = isMobile and math.min(260,workspace.CurrentCamera.ViewportSize.X-20) or 240
-            local itemH = isMobile and 36 or 30
-            local popH  = math.min(#opts*itemH+16, 260)
-            local pop   = Frame(GUI,UDim2.new(0,popW,0,popH),UDim2.new(0,0,0,0),C.bg0,6)
-            Stroke(pop,C.brd2,1); pop.ZIndex=110; pop.ClipsDescendants=true
-            local ap=b.AbsolutePosition; local vp=workspace.CurrentCamera.ViewportSize
-            local px=math.clamp(ap.X,4,vp.X-popW-4); local py=ap.Y+b.AbsoluteSize.Y+4
-            if py+popH>vp.Y-4 then py=ap.Y-popH-4 end
-            pop.Position=UDim2.new(0,px,0,py)
-            local sc=MakeScroll(pop); sc.Size=UDim2.new(1,-4,1,-4); sc.Position=UDim2.new(0,2,0,2)
-            local ov  -- pre-declared so item handlers can reference it
-            for i,opt in ipairs(opts) do
-                local sel=opt==AS_Map
-                local ib=Btn(sc,UDim2.new(1,0,0,itemH),UDim2.new(0,0,0,(i-1)*itemH),sel and C.bg4 or C.bg3)
-                Stroke(ib,C.brd,1)
-                local dSz=isMobile and 10 or 8
-                local dF=Frame(ib,UDim2.new(0,dSz,0,dSz),UDim2.new(0,isMobile and 12 or 10,0.5,-dSz/2),sel and C.acc or C.bg4,dSz/2)
-                Stroke(dF,C.brd2,1)
-                local iL=Lbl(ib,opt,isMobile and 12 or 11,sel and C.white or C.txt,Enum.Font.GothamMedium)
-                iL.Size=UDim2.new(1,-(dSz+24),1,0); iL.Position=UDim2.new(0,dSz+18,0,0)
-                ib.MouseButton1Click:Connect(function()
-                    AS_Map=opt; Flags["AS_Map"]=opt; AS_MapLbl.Text="Map  :  "..AS_Map
-                    pop:Destroy()
-                    if ov then ov:Destroy() end
-                end)
-            end
-            ov=Btn(GUI,UDim2.new(1,0,1,0),UDim2.new(0,0,0,0),C.bg0)
-            ov.BackgroundTransparency=1; ov.ZIndex=109
-            ov.MouseButton1Click:Connect(function() pop:Destroy(); ov:Destroy() end)
-        end)
-        return yOff+(isMobile and 38 or 34)
-    end
 
     -- ── AutoStart loop ───────────────────────────────────
-    -- First fire: 10s after enabling. Then every 30s.
+    -- First fire: AS_StartDelay seconds after enabling. Then every 30s.
+    local AS_StartDelay = 10  -- controlled by slider in UI
     local AS_wasEnabled = false
     local AS_NextFire   = 0  -- tick() when next fire is allowed
 
@@ -1667,10 +1617,10 @@ if isMainPlace then
                 AS_wasEnabled = false
                 continue
             end
-            -- Just turned on → schedule first fire in 10s
+            -- Just turned on → schedule first fire after AS_StartDelay seconds
             if not AS_wasEnabled then
                 AS_wasEnabled = true
-                AS_NextFire   = tick() + 10
+                AS_NextFire   = tick() + AS_StartDelay
             end
             -- Fire when timer expires, then reset to 30s interval
             if tick() >= AS_NextFire then
@@ -1689,39 +1639,133 @@ if isMainPlace then
         Toast("AutoStart", v and "Enabled" or "Disabled", v and "ok" or "err")
     end)
 
+    -- Dynamic label: "Start After X Seconds"
+    local AS_DelayLbl
+    y1, AS_DelayLbl = MakeLabel(Col1, "Start After "..AS_StartDelay.." Seconds", y1, C.txt)
+    y1 = MakeSlider(Col1, "Delay", y1, "AS_StartDelay", 1, 100, "%d", function(v)
+        AS_StartDelay = v
+        if AS_DelayLbl then AS_DelayLbl.Text = "Start After "..v.." Seconds" end
+        -- If already waiting, reset the countdown with the new delay
+        if AS_wasEnabled then AS_NextFire = tick() + v end
+    end)
+    -- Sync initial label to saved Flags value if any
+    if Flags["AS_StartDelay"] then
+        AS_StartDelay = Flags["AS_StartDelay"]
+        if AS_DelayLbl then AS_DelayLbl.Text = "Start After "..AS_StartDelay.." Seconds" end
+    end
+
     y1 = MakeSection(Col1, "Match Settings", y1)
 
-    y1 = MakeSelect(Col1, "Mode", y1, {"Infinity","Raid","Titan Defense","Survival"}, function(v)
+    -- Sequential reveal: each row appears only after the previous is selected.
+    -- UIListLayout inside seqContainer collapses hidden rows automatically.
+    local selH = isMobile and 38 or 34
+    local seqContainer = Frame(Col1, UDim2.new(1,0,0,0), UDim2.new(0,0,0,y1), C.bg0)
+    seqContainer.BackgroundTransparency = 1
+    seqContainer.AutomaticSize = Enum.AutomaticSize.Y
+    do local ll = Instance.new("UIListLayout", seqContainer)
+       ll.SortOrder = Enum.SortOrder.LayoutOrder; ll.Padding = UDim.new(0, 4) end
+
+    -- Advance y1 past the max possible height of all 5 rows
+    y1 = y1 + 5 * selH + 4 * 4
+
+    local function MakeSeqRow(order, vis)
+        local w = Frame(seqContainer, UDim2.new(1,0,0,selH), UDim2.new(0,0,0,0), C.bg0)
+        w.BackgroundTransparency = 1; w.LayoutOrder = order
+        w.Visible = (vis ~= false); return w
+    end
+
+    local rowMode    = MakeSeqRow(1, true)
+    local rowMap     = MakeSeqRow(2, false)
+    local rowDiff    = MakeSeqRow(3, false)
+    local rowFriends = MakeSeqRow(4, false)
+    local rowMax     = MakeSeqRow(5, false)
+
+    local function hideFrom(step)
+        if step <= 2 then rowMap.Visible     = false end
+        if step <= 3 then rowDiff.Visible    = false end
+        if step <= 4 then rowFriends.Visible = false end
+        if step <= 5 then rowMax.Visible     = false end
+    end
+
+    -- Row 1: Mode (always visible)
+    MakeSelect(rowMode, "Mode", 4, {"Infinity","Raid","Titan Defense","Survival"}, function(v)
         AS_Mode = v
-        -- Reset map to first valid option for this mode
+        hideFrom(2); rowMap.Visible = true
         local opts = MapOptions[v] or {}
-        if #opts > 0 and not table.find(opts, AS_Map) then
-            AS_Map = opts[1]
-            if AS_MapLbl then AS_MapLbl.Text = "Map  :  "..AS_Map end
-        end
+        AS_Map = opts[1] or "Shibuya"; Flags["AS_Map"] = AS_Map
+        if AS_MapLbl then AS_MapLbl.Text = "Map  :  "..AS_Map end
         Toast("AutoStart","Mode: "..v,"ok")
     end, "AS_Mode")
 
-    y1 = MakeDynMapSelect(Col1, y1)
+    -- Row 2: Map (inline dynamic select — options depend on current Mode)
+    do
+        local bH = isMobile and 30 or 26
+        local b  = Btn(rowMap, UDim2.new(1,-32,0,bH), UDim2.new(0,16,0,4), C.bg3, 4)
+        Stroke(b, C.brd2, 1)
+        Flags["AS_Map"] = AS_Map
+        AS_MapLbl = Lbl(b,"Map  :  "..AS_Map, isMobile and 11 or 11, C.txt, Enum.Font.GothamMedium)
+        AS_MapLbl.Size=UDim2.new(1,-28,1,0); AS_MapLbl.Position=UDim2.new(0,10,0,0)
+        Lbl(b,"v",isMobile and 10 or 9,C.txt2,Enum.Font.GothamBold,Enum.TextXAlignment.Right).Size=UDim2.new(0,20,1,0)
+        Setters["AS_Map"] = function(v)
+            AS_Map = v; Flags["AS_Map"] = v
+            if AS_MapLbl then AS_MapLbl.Text = "Map  :  "..v end
+            rowDiff.Visible = true  -- cascade on config load
+        end
+        b.MouseButton1Click:Connect(function()
+            local opts = MapOptions[AS_Mode] or {"Shibuya"}
+            if not table.find(opts, AS_Map) then AS_Map = opts[1]; AS_MapLbl.Text="Map  :  "..AS_Map end
+            local popW = isMobile and math.min(260,workspace.CurrentCamera.ViewportSize.X-20) or 240
+            local itemH = isMobile and 36 or 30
+            local popH  = math.min(#opts*itemH+16, 260)
+            local pop   = Frame(GUI,UDim2.new(0,popW,0,popH),UDim2.new(0,0,0,0),C.bg0,6)
+            Stroke(pop,C.brd2,1); pop.ZIndex=110; pop.ClipsDescendants=true
+            local ap=b.AbsolutePosition; local vp=workspace.CurrentCamera.ViewportSize
+            local px=math.clamp(ap.X,4,vp.X-popW-4); local py=ap.Y+b.AbsoluteSize.Y+4
+            if py+popH>vp.Y-4 then py=ap.Y-popH-4 end
+            pop.Position=UDim2.new(0,px,0,py)
+            local sc=MakeScroll(pop); sc.Size=UDim2.new(1,-4,1,-4); sc.Position=UDim2.new(0,2,0,2)
+            local ov
+            for i,opt in ipairs(opts) do
+                local sel=opt==AS_Map
+                local ib=Btn(sc,UDim2.new(1,0,0,itemH),UDim2.new(0,0,0,(i-1)*itemH),sel and C.bg4 or C.bg3)
+                Stroke(ib,C.brd,1)
+                local dSz=isMobile and 10 or 8
+                local dF=Frame(ib,UDim2.new(0,dSz,0,dSz),UDim2.new(0,isMobile and 12 or 10,0.5,-dSz/2),sel and C.acc or C.bg4,dSz/2)
+                Stroke(dF,C.brd2,1)
+                local iL=Lbl(ib,opt,isMobile and 12 or 11,sel and C.white or C.txt,Enum.Font.GothamMedium)
+                iL.Size=UDim2.new(1,-(dSz+24),1,0); iL.Position=UDim2.new(0,dSz+18,0,0)
+                ib.MouseButton1Click:Connect(function()
+                    AS_Map=opt; Flags["AS_Map"]=opt; AS_MapLbl.Text="Map  :  "..AS_Map
+                    hideFrom(3); rowDiff.Visible = true
+                    pop:Destroy(); if ov then ov:Destroy() end
+                end)
+            end
+            ov=Btn(GUI,UDim2.new(1,0,1,0),UDim2.new(0,0,0,0),C.bg0)
+            ov.BackgroundTransparency=1; ov.ZIndex=109
+            ov.MouseButton1Click:Connect(function() pop:Destroy(); ov:Destroy() end)
+        end)
+    end
 
-    -- Difficulty row (always visible; only used when Mode = Survival)
-    local _, diffLbl
-    y1, diffLbl = MakeLabel(Col1, "Difficulty (Survival only):", y1, C.txt3)
-    y1 = MakeSelect(Col1, "Difficulty", y1, {"Normal","Hard","Nightmare","Gravewalker"}, function(v)
+    -- Row 3: Difficulty
+    MakeSelect(rowDiff, "Difficulty", 4, {"Normal","Hard","Nightmare","Gravewalker"}, function(v)
         AS_Difficulty = v
+        hideFrom(4); rowFriends.Visible = true
         Toast("AutoStart","Difficulty: "..v,"ok")
     end, "AS_Difficulty")
 
-    y1 = MakeSelect(Col1, "Friends Only", y1, {"False","True"}, function(v)
+    -- Row 4: Friends Only
+    MakeSelect(rowFriends, "Friends Only", 4, {"False","True"}, function(v)
         AS_FriendsOnly = v == "True"
+        hideFrom(5); rowMax.Visible = true
         Toast("AutoStart","Friends Only: "..v,"ok")
     end, "AS_FriendsOnly")
 
-    y1 = MakeSelect(Col1, "Max Players", y1, {"1","2","3","4","5","6"}, function(v)
+    -- Row 5: Max Players (default 4)
+    if not Flags["AS_MaxPlayers"] then Flags["AS_MaxPlayers"] = "4" end
+    MakeSelect(rowMax, "Max Players", 4, {"1","2","3","4","5","6"}, function(v)
         AS_MaxPlayers = tonumber(v)
         Toast("AutoStart","Max Players: "..v,"ok")
     end, "AS_MaxPlayers")
-    AS_MaxPlayers = 4
 
     y1 = MakeSection(Col1, "Codes", y1)
     y1 = MakeActionBtn(Col1, "Claim All Codes", y1, function()
