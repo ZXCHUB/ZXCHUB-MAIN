@@ -208,8 +208,8 @@ CheckFn("hookfunction",
     "Hook/intercept function calls",                                                       "Hooking",     "")
 CheckFn("getrawmetatable", getrawmetatable,
     "Access raw metatables (bypasses some protections)",                                   "Metatables",  "")
-CheckFn("fireremoteevent", fireremoteevent,
-    "Fire RemoteEvents directly (used for skill casting)",                                 "RemoteEvents","Autofarm: Skills")
+CheckFn("FireServer (RemoteEvent)", true,
+    "Fire RemoteEvents (standard Roblox API — always supported)",                         "RemoteEvents","Autofarm: Skills")
 CheckFn("getnilinstances", getnilinstances,
     "Access nil-parented instances",                                                       "Environment", "Autofarm: Gates")
 
