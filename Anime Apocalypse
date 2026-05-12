@@ -1006,13 +1006,17 @@ local function GetInteract()
         and RS.Assets.Remotes:FindFirstChild("Interact")
 end
 
--- Read ability name from HUD (used in every FireServer call)
+-- Read ability name from HUD (used in every FireServer call).
+-- Converts all-caps text to title case: "DRAGON SLASH" → "Dragon Slash"
 local function GetAbilityName()
     local ok, v = pcall(function()
         return lp.PlayerGui.HUD.Main.Ultimate.AbilityName.Text
     end)
     if not ok or not v or v == "" then return "Spin" end
-    return v
+    -- Title-case every word (handles single and multi-word names)
+    return (v:gsub("(%a)([%a']*)", function(first, rest)
+        return first:upper() .. rest:lower()
+    end))
 end
 
 -- Read gadget name from HUD: "INFINITY [E]" → "Infinity"
