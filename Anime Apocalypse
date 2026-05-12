@@ -992,10 +992,11 @@ end
 local AF_Enabled       = false
 local AF_Distance      = 20
 local AF_Position      = "Above"
-local AF_SlotCycle     = false   -- cycle loadout slots 1→5 independently from skill spam
-local PP_Enabled       = false   -- ProximityPrompt auto-trigger
-local AF_LastSkillTime = 0       -- tick() of last Z/X/C/G/V/E keypress cycle
-local AF_LastSlotTime  = 0       -- tick() of last slot-switch keypress
+local AF_SwapAbility = false  -- cycle Slot1-5 when all Z/X/C/G/E are on cooldown
+local PP_Enabled     = false  -- ProximityPrompt auto-trigger
+local AF_AutoRetry   = false  -- fire "PlayAgain" after each ProximityPrompt activation
+local AF_LastVTime   = 0      -- tick() of last V-skill fire (60 s timer)
+local AF_CurrentSlot = 1      -- active loadout slot for swap cycling (1-5)
 
 -- ── Helpers ──────────────────────────────────────────────
 
@@ -1005,70 +1006,114 @@ local function GetInteract()
         and RS.Assets.Remotes:FindFirstChild("Interact")
 end
 
+-- Read ability name from HUD (used in every FireServer call)
 local function GetAbilityName()
     local ok, v = pcall(function()
-        return tostring(lp.Data.ExclusiveAbilities.Value)
+        return lp.PlayerGui.HUD.Main.Ultimate.AbilityName.Text
     end)
-    if not ok or not v then return "Spin" end
-    return v:match('"([^"]+)"') or v:match("%[\"(.-)\"")  or v:match("^%S+$") or "Spin"
+    if not ok or not v or v == "" then return "Spin" end
+    return v
 end
 
--- ── Windows virtual-key codes ─────────────────────────────
--- Skill keys: Z X C G V E
-local VK_Z=0x5A; local VK_X=0x58; local VK_C=0x43
-local VK_G=0x47; local VK_V=0x56; local VK_E=0x45
-local AF_SKILL_VKS = {VK_Z, VK_X, VK_C, VK_G, VK_V, VK_E}
--- Slot-switch keys: 1 2 3 4 5
-local VK_SLOTS = {0x31, 0x32, 0x33, 0x34, 0x35}
+-- Read gadget name from HUD: "INFINITY [E]" → "Infinity"
+local function GetGadgetName()
+    local ok, v = pcall(function()
+        return lp.PlayerGui.HUD.Main.Profile.Gadget.GadgetName.Text
+    end)
+    if not ok or not v or v == "" then return "Infinity" end
+    local name = v:match("^(.-)%s+%[") or v  -- everything before " ["
+    name = name:gsub("%s+$", "")             -- trim trailing spaces
+    if #name == 0 then return "Infinity" end
+    return name:sub(1,1):upper() .. name:sub(2):lower()
+end
 
--- Press and immediately release a single key
-local function PressKey(vk)
+-- ── CD-ready reference sizes (strict equality as requested) ───────────────
+-- Z / X / C  (AbilityHotbar.KEY.CD.Size when no cooldown)
+local CD_NONE = UDim2.new(1.04299998, -6, -0.800000012, -6)
+-- G  (Ultimate.Progress.Fill.Size when ult ready)
+local ULT_READY = UDim2.new(0.930000007, 0, 0.908999979, 0)
+-- E  (Profile.Gadget.Fill.Size when gadget ready)
+local GADGET_READY = UDim2.new(0.944198668, 0, 1.01564765, 0)
+
+local function AbilityReady(key)   -- key = "Z" | "X" | "C"
+    local ok, sz = pcall(function()
+        return lp.PlayerGui.HUD.Main.AbilityHotbar[key].CD.Size
+    end)
+    return ok and sz == CD_NONE
+end
+
+local function UltReady()
+    local ok, sz = pcall(function()
+        return lp.PlayerGui.HUD.Main.Ultimate.Progress.Fill.Size
+    end)
+    return ok and sz == ULT_READY
+end
+
+local function GadgetReady()
+    local ok, sz = pcall(function()
+        return lp.PlayerGui.HUD.Main.Profile.Gadget.Fill.Size
+    end)
+    return ok and sz == GADGET_READY
+end
+
+-- Returns true when at least one of Z / X / C / G / E is ready
+local function AnySkillReady()
+    return AbilityReady("Z") or AbilityReady("X") or AbilityReady("C")
+        or UltReady() or GadgetReady()
+end
+
+-- Fire whichever of Z / X / C / G / E are currently ready.
+-- Returns true if at least one was fired.
+local function FireReadySkills()
+    local ev = GetInteract()
+    if not ev then return false end
+    local fired = false
+
+    if AbilityReady("Z") then
+        pcall(function() ev:FireServer("Ability", 1, "Slot2", GetAbilityName(), "Began") end)
+        fired = true
+    end
+    if AbilityReady("X") then
+        pcall(function() ev:FireServer("Ability", 2, "Slot2", GetAbilityName(), "Began") end)
+        fired = true
+    end
+    if AbilityReady("C") then
+        pcall(function() ev:FireServer("Ability", 3, "Slot2", GetAbilityName(), "Began") end)
+        fired = true
+    end
+    if UltReady() then
+        pcall(function() ev:FireServer("Ability", 5, "Slot2", GetAbilityName(), "Began") end)
+        fired = true
+    end
+    if GadgetReady() then
+        pcall(function() ev:FireServer("Gadget", "Slot1", GetGadgetName(), "Began") end)
+        fired = true
+    end
+
+    return fired
+end
+
+-- Equip a loadout slot: FuncInteract remote first, keypress fallback
+local VK_SLOTS = {0x31, 0x32, 0x33, 0x34, 0x35}  -- keys 1-5 (kept for PP + slot fallback)
+
+local function PressKey(vk)  -- still used for ProximityPrompt E-key fallback
     if keypress  then pcall(function() keypress(vk)  end) end
     task.wait(0.04)
     if keyrelease then pcall(function() keyrelease(vk) end) end
 end
 
--- FuncInteract remote — used as slot-switch fallback when keypress unavailable
 local function GetFuncInteract()
     return RS:FindFirstChild("Assets")
         and RS.Assets:FindFirstChild("Requests")
         and RS.Assets.Requests:FindFirstChild("FuncInteract")
 end
 
--- RemoteEvent skill fallback — used when keypress is unavailable
-local function FireAllSkillsRemote()
-    local ev = GetInteract()
-    if not ev then return end
-    local ab = GetAbilityName()
-    pcall(function() ev:FireServer("Ability", 1, "Slot2", ab, "Began") end)
-    pcall(function() ev:FireServer("Ability", 2, "Slot2", ab, "Began") end)
-    pcall(function() ev:FireServer("Ability", 3, "Slot2", ab, "Began") end)
-    pcall(function() ev:FireServer("Ability", 4, "Slot2", ab, "Began") end)
-    pcall(function() ev:FireServer("Ability", 5, "Slot2", ab, "Began") end)
-    pcall(function() ev:FireServer("Gadget",  "Slot1", "Infinity", "Began") end)
-end
-
--- Fire all skills: keypress Z/X/C/G/V/E if executor supports it, else RemoteEvent
-local function DoSkills()
-    if keypress and keyrelease then
-        for _, vk in ipairs(AF_SKILL_VKS) do
-            PressKey(vk)  -- ~0.04s each → ~0.24s total for 6 keys
-        end
-    else
-        FireAllSkillsRemote()
-    end
-end
-
--- Switch to the next loadout slot: press 1-5 key, else EquipAbility remote
-local function DoSlotSwitch()
-    AF_EquipSlot = (AF_EquipSlot % 5) + 1
-    if keypress and keyrelease then
-        PressKey(VK_SLOTS[AF_EquipSlot])
-    else
-        local fi = GetFuncInteract()
-        if fi then
-            pcall(function() fi:InvokeServer("EquipAbility", "Slot" .. AF_EquipSlot) end)
-        end
+local function EquipSlot(n)
+    local fi = GetFuncInteract()
+    if fi then
+        pcall(function() fi:InvokeServer("EquipAbility", "Slot" .. n) end)
+    elseif keypress and keyrelease then
+        PressKey(VK_SLOTS[n])
     end
 end
 
@@ -1105,7 +1150,6 @@ end
 
 local AF_ShieldActive  = false  -- true while shield pause is running
 local AF_ShieldEndTime = 0      -- tick() when shield pause expires
-local AF_EquipSlot = 1  -- current loadout slot (1-5), cycled by DoSlotSwitch
 
 local function DoTeleport(target, distOverride)
     local char = lp.Character
@@ -1115,6 +1159,8 @@ local function DoTeleport(target, distOverride)
 
     local dist   = distOverride or AF_Distance
     local npcPos = target.hrp.Position
+    -- Sanity-check: if NPC was launched into the void after dying, skip this frame
+    if npcPos.Magnitude > 5000 then return end
     local offset
     if AF_Position == "Above" then
         offset = Vector3.new(0, dist, 0)
@@ -1213,8 +1259,10 @@ RunService.Heartbeat:Connect(function()
 end)
 
 -- Main autofarm loop (0.1 s tick)
--- • Skills  — Z X C G V E keypresses every ~0.5 s (always when AF_Enabled)
--- • Slots   — 1/2/3/4/5 keypresses every ~0.4 s (only when AF_SlotCycle enabled)
+-- • Skills  — fires Z/X/C/G/E via RemoteEvent as soon as HUD CD clears
+-- • Swap    — if ALL of Z/X/C/G/E are on CD and AF_SwapAbility is ON, cycle slots 1→2→3→4→5→1
+-- • V       — fires every 60 s independently of everything else
+-- • Config  — pauses skill firing while the Config tab (index 2) is open
 -- • Target  — FindTarget() every tick so Heartbeat always has a fresh position
 task.spawn(function()
     while true do
@@ -1226,18 +1274,31 @@ task.spawn(function()
 
         AF_CurrentTarget = FindTarget()  -- used by Heartbeat for teleport
 
-        local now = tick()
+        -- Pause skill firing while the Config tab is open
+        if ActiveTab == 2 then continue end
 
-        -- Skills: press Z X C G V E every 0.5 s regardless of target or slot state
-        if now - AF_LastSkillTime >= 0.5 then
-            AF_LastSkillTime = now
-            task.spawn(DoSkills)  -- spawn so 6 key-presses don't block the 0.1 s loop
+        -- ── V skill: independent 60-second timer ─────────────────
+        local now = tick()
+        if now - AF_LastVTime >= 60 then
+            AF_LastVTime = now
+            task.spawn(function()
+                local ev = GetInteract()
+                if ev then
+                    pcall(function()
+                        ev:FireServer("Ability", 4, "Slot3", GetAbilityName(), "Began")
+                    end)
+                end
+            end)
         end
 
-        -- Slot cycling: independent toggle — switch slot every 0.4 s
-        if AF_SlotCycle and now - AF_LastSlotTime >= 0.4 then
-            AF_LastSlotTime = now
-            task.spawn(DoSlotSwitch)
+        -- ── Z / X / C / G / E skills ──────────────────────────────
+        FireReadySkills()
+
+        -- ── Swap Ability: cycle slot if ALL skills on CD ──────────
+        if AF_SwapAbility and not AnySkillReady() then
+            AF_CurrentSlot = (AF_CurrentSlot % 5) + 1
+            EquipSlot(AF_CurrentSlot)
+            -- Check CD immediately after equipping (no extra wait)
         end
     end
 end)
@@ -1326,6 +1387,17 @@ task.spawn(function()
             if not PP_Enabled then break end
             pcall(function() TriggerPrompt(prompt) end)
         end
+
+        -- After ALL prompts have been activated, wait 10 s then fire PlayAgain once
+        if AF_AutoRetry and PP_Enabled then
+            task.delay(10, function()
+                if not AF_AutoRetry then return end
+                pcall(function()
+                    local ev = GetInteract()
+                    if ev then ev:FireServer("PlayAgain") end
+                end)
+            end)
+        end
     end
 end)
 
@@ -1347,13 +1419,18 @@ if not isMainPlace then
         if v then FireGates(); Toast("Autofarm","Started — Gates fired","ok")
         else Toast("Autofarm","Stopped","err") end
     end)
-    y1 = MakeToggle(Col1, "Cycle Slots (1→2→3→4→5)", y1, "AutofarmSlotCycle", function(v)
-        AF_SlotCycle = v
-        Toast("Autofarm", v and "Slot cycling ON" or "Slot cycling OFF", v and "ok" or "warn")
+    y1 = MakeToggle(Col1, "Swap Ability", y1, "AutofarmSwapAbility", function(v)
+        AF_SwapAbility = v
+        AF_CurrentSlot = 1  -- reset slot pointer when toggling
+        Toast("Autofarm", v and "Swap Ability: ON" or "Swap Ability: OFF", v and "ok" or "warn")
     end)
     y1 = MakeToggle(Col1, "Auto ProximityPrompts", y1, "AutoProxPrompt", function(v)
         PP_Enabled = v
         Toast("Autofarm", v and "ProximityPrompts: ON" or "ProximityPrompts: OFF", v and "ok" or "warn")
+    end)
+    y1 = MakeToggle(Col1, "Auto Retry (PlayAgain)", y1, "AutoRetry", function(v)
+        AF_AutoRetry = v
+        Toast("Autofarm", v and "Auto Retry: ON" or "Auto Retry: OFF", v and "ok" or "warn")
     end)
 
     y1 = MakeSection(Col1, "Settings", y1)
@@ -1553,6 +1630,34 @@ if isMainPlace then
         Toast("AutoStart","Max Players: "..v,"ok")
     end)
     AS_MaxPlayers = 4
+
+    y1 = MakeSection(Col1, "Codes", y1)
+    y1 = MakeActionBtn(Col1, "Claim All Codes", y1, function()
+        local fi = RS:FindFirstChild("Assets")
+            and RS.Assets:FindFirstChild("Requests")
+            and RS.Assets.Requests:FindFirstChild("FuncInteract")
+        if not fi then
+            Toast("Codes", "FuncInteract not found", "err")
+            return
+        end
+        local codes = {"SBRUPDATE", "NEWGAMEMODE", "BEYONDTHEWALLS", "5KFOLLOWERS!"}
+        local ok_count, fail_count = 0, 0
+        task.spawn(function()
+            for _, code in ipairs(codes) do
+                local s, e = pcall(function()
+                    fi:InvokeServer("UseCode", code)
+                end)
+                if s then ok_count += 1 else fail_count += 1 end
+                task.wait(0.3)
+            end
+            if fail_count == 0 then
+                Toast("Codes", "All " .. ok_count .. " codes claimed!", "ok")
+            else
+                Toast("Codes", ok_count .. " claimed, " .. fail_count .. " failed", "warn")
+            end
+        end)
+        Toast("Codes", "Claiming codes...", "ok")
+    end)
 
 end
 
