@@ -1799,6 +1799,25 @@ if isMainPlace then
         Toast("AutoStart","Max Players: "..v,"ok")
     end, "AS_MaxPlayers")
 
+    -- ── Post-config-load UI sync ─────────────────────────
+    -- ConfigManager:Load fires setters in pairs() order (non-deterministic).
+    -- hideFrom() inside the Mode callback can hide rows that were already
+    -- revealed by earlier setters. task.defer runs after the whole script
+    -- (including auto-load) finishes, so we restore correct visibility here.
+    task.defer(function()
+        if not Flags["AS_Mode"] then return end   -- nothing was loaded
+        rowMap.Visible = true
+        if AS_Mode == "Survival" then
+            rowDiff.Visible    = Flags["AS_Map"]        ~= nil
+            rowFriends.Visible = Flags["AS_Difficulty"] ~= nil
+            rowMax.Visible     = Flags["AS_FriendsOnly"] ~= nil
+        else
+            rowDiff.Visible    = false
+            rowFriends.Visible = Flags["AS_Map"]         ~= nil
+            rowMax.Visible     = Flags["AS_FriendsOnly"] ~= nil
+        end
+    end)
+
     y1 = MakeSection(Col1, "Codes", y1)
     y1 = MakeActionBtn(Col1, "Claim All Codes", y1, function()
         local fi = RS:FindFirstChild("Assets")
