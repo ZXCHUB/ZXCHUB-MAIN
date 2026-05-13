@@ -793,7 +793,7 @@ local function MakeSlider(parent, text, yOff, flag, minV, maxV, fmt, callback)
     end
 
     SetVal(Flags[flag] or minV, false)
-    Setters[flag]=function(v) SetVal(v,false) end
+    Setters[flag]=function(v) SetVal(v,true) end
 
     local function P2V(ax)
         return minV+(maxV-minV)*math.clamp((ax-track.AbsolutePosition.X)/track.AbsoluteSize.X,0,1)
@@ -1171,14 +1171,14 @@ local function FindTarget()
     for _, child in ipairs(folder:GetChildren()) do
         if child:IsA("Model") then
             -- Skip dead NPCs (Config.Health.Value == 0)
-            local hp = child:FindFirstChild("Config")
-                and child.Config:FindFirstChild("Health")
+            local hp = child:FindFirstChild("Config", true)
+                and child:FindFirstChild("Config", true):FindFirstChild("Health")
             if hp and hp.Value <= 0 then continue end
-            -- Head → HumanoidRootPart → PrimaryPart → any BasePart
-            local hrp = child:FindFirstChild("Head")
-                or child:FindFirstChild("HumanoidRootPart")
+            -- Head → HumanoidRootPart → PrimaryPart → any BasePart (recursive)
+            local hrp = child:FindFirstChild("Head", true)
+                or child:FindFirstChild("HumanoidRootPart", true)
                 or child.PrimaryPart
-                or child:FindFirstChildWhichIsA("BasePart")
+                or child:FindFirstChildWhichIsA("BasePart", true)
             if hrp then
                 return {hrp = hrp, model = child}
             end
@@ -1710,8 +1710,11 @@ if isMainPlace then
         AS_Mode = v
         hideFrom(2); rowMap.Visible = true
         local opts = MapOptions[v] or {}
-        AS_Map = opts[1] or "Shibuya"; Flags["AS_Map"] = AS_Map
-        if AS_MapLbl then AS_MapLbl.Text = "Map  :  "..AS_Map end
+        -- Only reset map if current map is not valid for the new mode
+        if not table.find(opts, AS_Map) then
+            AS_Map = opts[1] or "Shibuya"; Flags["AS_Map"] = AS_Map
+            if AS_MapLbl then AS_MapLbl.Text = "Map  :  "..AS_Map end
+        end
         Toast("AutoStart","Mode: "..v,"ok")
     end, "AS_Mode")
 
