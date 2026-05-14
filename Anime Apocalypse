@@ -1008,7 +1008,9 @@ local AF_Enabled       = false
 local AF_Distance      = 20
 local AF_Position      = "Above"
 local AF_SwapAbility = false  -- cycle Slot1-5 when all Z/X/C/G/E are on cooldown
-local PP_Enabled     = false  -- ProximityPrompt auto-trigger
+local PP_Enabled      = true  -- ProximityPrompt auto-trigger (on by default)
+local AF_UseUlt       = true  -- fire G (ult) when ready
+local AF_UseGadget    = true  -- fire E (gadget) when ready
 local AF_LastVTime    = 0     -- tick() of last V-skill fire (60 s timer)
 local AF_GadgetFiring = false -- true while Slot1→5 gadget burst is in progress
 local AF_AutoRetry    = false -- watch Revive/EndScreen and fire PlayAgain
@@ -1116,7 +1118,7 @@ local function FireReadySkills()
         FireAbility(ev, 3, name)
         fired = true
     end
-    if UltReady() then
+    if AF_UseUlt and UltReady() then
         local name = GetAbilityName()
         FireAbility(ev, 5, name)
         fired = true
@@ -1390,7 +1392,7 @@ task.spawn(function()
         end
 
         -- ── Gadget: fires when CD clears (Slot1→Slot5, 0.1s between each) ──
-        if GadgetReady() and not AF_GadgetFiring then
+        if AF_UseGadget and GadgetReady() and not AF_GadgetFiring then
             AF_GadgetFiring = true
             task.spawn(function()
                 local ev = GetInteract()
@@ -1530,9 +1532,20 @@ if not isMainPlace then
         AF_CurrentSlot = 1  -- reset slot pointer when toggling
         Toast("Autofarm", v and "Swap Ability: ON" or "Swap Ability: OFF", v and "ok" or "warn")
     end)
+    if Flags["AutoProxPrompt"] == nil then Flags["AutoProxPrompt"] = true end
     y1 = MakeToggle(Col1, "Auto ProximityPrompts", y1, "AutoProxPrompt", function(v)
         PP_Enabled = v
         Toast("Autofarm", v and "ProximityPrompts: ON" or "ProximityPrompts: OFF", v and "ok" or "warn")
+    end)
+    if Flags["AutoUlt"] == nil then Flags["AutoUlt"] = true end
+    y1 = MakeToggle(Col1, "Use Ult (G)", y1, "AutoUlt", function(v)
+        AF_UseUlt = v
+        Toast("Autofarm", v and "Ult: ON" or "Ult: OFF", v and "ok" or "warn")
+    end)
+    if Flags["AutoGadget"] == nil then Flags["AutoGadget"] = true end
+    y1 = MakeToggle(Col1, "Use Gadget (E)", y1, "AutoGadget", function(v)
+        AF_UseGadget = v
+        Toast("Autofarm", v and "Gadget: ON" or "Gadget: OFF", v and "ok" or "warn")
     end)
     y1 = MakeToggle(Col1, "Auto Retry (PlayAgain)", y1, "AutoRetry", function(v)
         AF_AutoRetry = v
