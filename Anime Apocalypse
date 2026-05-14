@@ -1082,9 +1082,11 @@ local function GadgetReady()
 end
 
 -- Returns true when at least one of Z / X / C / G / E is ready
+-- Respects AF_UseUlt and AF_UseGadget toggles
 local function AnySkillReady()
     return AbilityReady("Z") or AbilityReady("X") or AbilityReady("C")
-        or UltReady() or GadgetReady()
+        or (AF_UseUlt and UltReady())
+        or (AF_UseGadget and GadgetReady())
 end
 
 -- Fire one ability on all five slots back-to-back (Slot1 → Slot2 → Slot3 → Slot4 → Slot5)
