@@ -1198,8 +1198,6 @@ local function DoTeleport(target, distOverride)
 
     local dist   = distOverride or AF_Distance
     local npcPos = target.hrp.Position
-    -- Sanity-check: if NPC was launched into the void after dying, skip this frame
-    if npcPos.Magnitude > 5000 then return end
     local offset
     if AF_Position == "Above" then
         offset = Vector3.new(0, dist, 0)
