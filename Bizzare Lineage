@@ -396,7 +396,9 @@ RaidState = {
     LastTargetScan = 0,   -- for 5-second rescan
     IsRunning = false,    -- loop guard
     WaitingRetry = false, -- waiting after kill
-    BossHighHp = false,   -- true when BossUi max HP > 9999 → crystal mode allowed
+    BossHighHp = false,   -- kept for compat, unused now
+    Phase = "idle",       -- "normal_timed" / "crystals" / "normal" / "idle"
+    PhaseStart = 0,
 }
 
 PlayerState = {
@@ -960,100 +962,127 @@ function StartRaidLoop()
         end)
         task.wait(2)
 
-        -- Step 4: if Netherstar1/2/3 exist in Live → kill them first, then normal NPCs
+        -- ── Helper: get Live folder ──
         local function GetLiveFolder()
             return Workspace:FindFirstChild("Live")
         end
 
-        local function IsCrystalAlive(name)
-            local live = GetLiveFolder()
-            return live and live:FindFirstChild(name, true) ~= nil  -- recursive within Live
-        end
-
-        local function AnyCrystalsAlive()
-            return IsCrystalAlive("Netherstar1")
-                or IsCrystalAlive("Netherstar2")
-                or IsCrystalAlive("Netherstar3")
-        end
-
-        while Flags.AutoRaidEnabled and not IsInRaidPlace do
-
-            if RaidState.BossHighHp and AnyCrystalsAlive() then
-                -- ── CRYSTAL MODE: kill Netherstar1 → 2 → 3 (in order) ──
-                -- Attack each crystal until it DISAPPEARS from Workspace.Live,
-                -- then move to next. Outer while re-checks after all 3 tried.
-                for _, starName in ipairs({"Netherstar1", "Netherstar2", "Netherstar3"}) do
-                    if not Flags.AutoRaidEnabled or IsInRaidPlace then break end
-                    if not IsCrystalAlive(starName) then continue end  -- already gone, skip
-
-                    -- Attack until this crystal disappears from Live folder
-                    while Flags.AutoRaidEnabled and not IsInRaidPlace do
-                        -- Re-fetch every tick so we always have the live reference
-                        local live = GetLiveFolder()
-                        local star = live and live:FindFirstChild(starName, true)
-                        if not star then break end  -- model gone → move to next crystal
-
-                        RaidState.CurrentTarget = star
-                        GlideAboveCrystal(star)
-                        if tick() - RaidState.LastM1 >= 0.3 then
-                            RaidState.LastM1 = tick()
-                            DoM1()
-                        end
-                        if Flags.RaidUseSkills ~= false then DoSkillsAsync() end
-                        task.wait(0.1)
-                    end
-                    RaidState.CurrentTarget = nil
-                    task.wait(0.2)
+        -- ── Helper: attack one NPC until it dies or vanishes ──
+        local function AttackNpc(npc)
+            while Flags.AutoRaidEnabled and not IsInRaidPlace do
+                if not npc or not npc.Parent then break end
+                local hum = npc:FindFirstChildOfClass("Humanoid")
+                if not hum or hum.Health <= 0 then break end
+                GlideAboveNpc(npc)
+                if tick() - RaidState.LastM1 >= 0.3 then
+                    RaidState.LastM1 = tick()
+                    DoM1()
                 end
-                -- outer while re-checks AnyCrystalsAlive at top of next iteration
+                if Flags.RaidUseSkills ~= false then DoSkillsAsync() end
+                task.wait(0.1)
+            end
+            RaidState.CurrentTarget = nil
+        end
 
-            else
-                -- ── NORMAL MODE: attack nearest non-Netherstar NPC ──
-                RaidState.CurrentTarget = nil
+        -- ── Helper: attack one crystal until it disappears from Live ──
+        local function AttackCrystal(starName)
+            while Flags.AutoRaidEnabled and not IsInRaidPlace do
+                local live = GetLiveFolder()
+                local star = live and live:FindFirstChild(starName, true)
+                if not star then break end  -- disappeared → done
+                RaidState.CurrentTarget = star
+                GlideAboveCrystal(star)
+                if tick() - RaidState.LastM1 >= 0.3 then
+                    RaidState.LastM1 = tick()
+                    DoM1()
+                end
+                if Flags.RaidUseSkills ~= false then DoSkillsAsync() end
+                task.wait(0.1)
+            end
+            RaidState.CurrentTarget = nil
+            task.wait(0.2)
+        end
+
+        -- ── Helper: attack normal NPCs until timer fires or no NPCs left ──
+        -- Returns false if no NPC found (trigger retryraid), true otherwise
+        local function RunNormalPhase(untilTime)
+            while Flags.AutoRaidEnabled and not IsInRaidPlace do
+                -- Check if time to switch to crystals
+                if untilTime and tick() >= untilTime then return true end
+
                 RaidState.LastTargetScan = 0
-                npc = FindNearestNonNetherstarNpc()
+                local npc = FindNearestNonNetherstarNpc()
+                if not npc then return false end  -- no NPCs → caller handles retry
 
-                if npc then
-                    RaidState.CurrentTarget = npc
-                    RaidState.LastTargetScan = tick()
-                    while Flags.AutoRaidEnabled and not IsInRaidPlace do
-                        if not npc or not npc.Parent then break end
-                        hum = npc:FindFirstChildOfClass("Humanoid")
-                        if not hum or hum.Health <= 0 then break end
-                        -- Switch to crystals immediately if boss HP > 9999 and crystals appear
-                        if RaidState.BossHighHp and AnyCrystalsAlive() then break end
-                        GlideAboveNpc(npc)
-                        if tick() - RaidState.LastM1 >= 0.3 then
-                            RaidState.LastM1 = tick()
-                            DoM1()
-                        end
-                        if Flags.RaidUseSkills ~= false then DoSkillsAsync() end
-                        task.wait(0.1)
+                RaidState.CurrentTarget = npc
+                while Flags.AutoRaidEnabled and not IsInRaidPlace do
+                    if untilTime and tick() >= untilTime then
+                        RaidState.CurrentTarget = nil
+                        return true
                     end
-                    RaidState.CurrentTarget = nil
-                    RaidState.LastTargetScan = 0
-                    task.wait(0.2)
-                else
-                    -- No NPCs left — fire retryraid
-                    if Flags.AutoRaidEnabled then
-                        RaidState.WaitingRetry = true
-                        waitStart = tick()
-                        while tick() - waitStart < 15 do
-                            task.wait(1)
-                            RaidState.CurrentTarget = nil
-                            RaidState.LastTargetScan = 0
-                            if FindNearestNonNetherstarNpc() then break end
-                        end
-                        if FindNearestNonNetherstarNpc() then
-                            RaidState.WaitingRetry = false
-                        else
-                            pcall(function()
-                                local retryEvent = game:GetService("ReplicatedStorage").requests.character.retryraid
-                                retryEvent:FireServer()
-                            end)
-                            task.wait(1)
-                            RaidState.WaitingRetry = false
-                        end
+                    if not npc or not npc.Parent then break end
+                    local hum = npc:FindFirstChildOfClass("Humanoid")
+                    if not hum or hum.Health <= 0 then break end
+                    GlideAboveNpc(npc)
+                    if tick() - RaidState.LastM1 >= 0.3 then
+                        RaidState.LastM1 = tick()
+                        DoM1()
+                    end
+                    if Flags.RaidUseSkills ~= false then DoSkillsAsync() end
+                    task.wait(0.1)
+                end
+                RaidState.CurrentTarget = nil
+                task.wait(0.1)
+            end
+            return true
+        end
+
+        -- ═══════════════════════════════════════════════════
+        -- MAIN RAID SEQUENCE
+        -- Phase 1 (60s): normal NPCs
+        -- Phase 2:       Netherstar1 → 2 → 3 (until each disappears from Live)
+        -- Phase 3:       normal NPCs indefinitely (retryraid if none left)
+        -- ═══════════════════════════════════════════════════
+        RaidState.PhaseStart = tick()
+        RaidState.Phase = "normal_timed"
+
+        -- Phase 1: attack NPCs for 60 seconds
+        local crystalTime = tick() + 60
+        RunNormalPhase(crystalTime)
+
+        -- Phase 2: attack crystals in order
+        if Flags.AutoRaidEnabled and not IsInRaidPlace then
+            RaidState.Phase = "crystals"
+            for _, starName in ipairs({"Netherstar1", "Netherstar2", "Netherstar3"}) do
+                if not Flags.AutoRaidEnabled or IsInRaidPlace then break end
+                AttackCrystal(starName)
+            end
+        end
+
+        -- Phase 3: normal NPCs indefinitely
+        RaidState.Phase = "normal"
+        while Flags.AutoRaidEnabled and not IsInRaidPlace do
+            local gotNpc = RunNormalPhase(nil)
+            if not gotNpc then
+                -- No NPCs left — fire retryraid
+                if Flags.AutoRaidEnabled then
+                    RaidState.WaitingRetry = true
+                    local waitStart = tick()
+                    while tick() - waitStart < 15 do
+                        task.wait(1)
+                        RaidState.CurrentTarget = nil
+                        RaidState.LastTargetScan = 0
+                        if FindNearestNonNetherstarNpc() then break end
+                    end
+                    if FindNearestNonNetherstarNpc() then
+                        RaidState.WaitingRetry = false
+                    else
+                        pcall(function()
+                            local retryEvent = game:GetService("ReplicatedStorage").requests.character.retryraid
+                            retryEvent:FireServer()
+                        end)
+                        task.wait(1)
+                        RaidState.WaitingRetry = false
                     end
                 end
             end
@@ -1085,43 +1114,35 @@ task.spawn(function()
     end
 end)
 
--- BossUi health poller: every 1s read MainHud.holder.BossUi.health text
--- Format: "current/max" — set BossHighHp = true only if max > 9999
+-- BossUi health poller: first check after 10s, then every 1s forever
+-- Extract ALL numbers from text, take the last one as MaxHP
+-- Crystal mode ON only if MaxHP > 9999
 task.spawn(function()
-    local lastState = nil  -- track changes for toast debug
+    task.wait(10)  -- wait 10s after inject before first check
     while true do
         task.wait(1)
         local newState = false
-        local debugText = "no UI"
         pcall(function()
             local hud = lp.PlayerGui:FindFirstChild("MainHud")
             local holder = hud and hud:FindFirstChild("holder")
             local bossUi = holder and holder:FindFirstChild("BossUi")
             local healthLabel = bossUi and bossUi:FindFirstChild("health")
-            if not healthLabel then debugText = "label not found" return end
+            if not healthLabel then return end
             local text = tostring(healthLabel.Text)
-            debugText = text
-            -- strip whitespace, then grab all digit groups
-            local clean = text:gsub("%s+", "")
-            -- find two numbers separated by any non-digit character
-            local curStr, maxStr = clean:match("(%d[%d,]*)%D+(%d[%d,]*)")
-            if maxStr then
-                local maxVal = tonumber(maxStr:gsub(",", ""))
+            -- Grab every sequence of digits from the text (ignores separator type)
+            local nums = {}
+            for n in text:gmatch("%d+") do
+                table.insert(nums, tonumber(n))
+            end
+            -- Last number in "cur/max" is the max HP
+            if #nums >= 2 then
+                local maxVal = nums[#nums]
                 if maxVal and maxVal > 9999 then
                     newState = true
                 end
             end
         end)
         RaidState.BossHighHp = newState
-        -- Toast when state changes so you can see it working
-        if newState ~= lastState then
-            lastState = newState
-            if newState then
-                Toast("BossHP", "Crystal mode ON | " .. debugText, "ok")
-            else
-                Toast("BossHP", "Crystal mode OFF | " .. debugText, "warn")
-            end
-        end
     end
 end)
 
@@ -2671,6 +2692,12 @@ else
     statusLbl = Lbl(statusF, "Status: Idle", isMobile and 11 or 10, C.txt2, Enum.Font.GothamMedium, Enum.TextXAlignment.Center)
     yAR = yAR + (isMobile and 36 or 32)
 
+    -- Boss HP debug label
+    bossDebugF = Frame(ARCol, UDim2.new(1,-32,0,isMobile and 28 or 24), UDim2.new(0,16,0,yAR), C.bg3, 4)
+    Stroke(bossDebugF, C.brd2, 1)
+    bossDebugLbl = Lbl(bossDebugF, "BossUi: reading...", isMobile and 11 or 10, C.txt2, Enum.Font.GothamMedium, Enum.TextXAlignment.Center)
+    yAR = yAR + (isMobile and 36 or 32)
+
     function UpdateRaidStatus()
         if not Flags.AutoRaidEnabled then
             statusLbl.Text = "Status: Disabled"
@@ -2678,17 +2705,73 @@ else
         elseif RaidState.WaitingRetry then
             statusLbl.Text = "Status: All cleared — retrying..."
             statusLbl.TextColor3 = Color3.fromRGB(235,160,25)
-        elseif RaidState.CurrentTarget and IsRaidNpc(RaidState.CurrentTarget) then
+        elseif RaidState.Phase == "crystals" then
+            local tgt = RaidState.CurrentTarget
+            local cname = tgt and tgt.Name or "..."
+            statusLbl.Text = "Crystal phase — killing " .. cname
+            statusLbl.TextColor3 = Color3.fromRGB(235,160,25)
+        elseif RaidState.Phase == "normal_timed" then
+            local secsLeft = math.max(0, math.ceil((RaidState.PhaseStart + 60) - tick()))
+            statusLbl.Text = "Normal NPCs — crystals in " .. secsLeft .. "s"
+            statusLbl.TextColor3 = C.acc
+        elseif RaidState.CurrentTarget then
             local name = GetFarmDisplayName(RaidState.CurrentTarget)
-            statusLbl.Text = "Status: Attacking — " .. name
+            statusLbl.Text = "Attacking — " .. name
             statusLbl.TextColor3 = C.grn
         elseif RaidState.IsRunning then
-            statusLbl.Text = "Status: Searching for next NPC..."
+            statusLbl.Text = "Status: Searching..."
             statusLbl.TextColor3 = C.acc
         else
             statusLbl.Text = "Status: Idle"
             statusLbl.TextColor3 = C.txt2
         end
+
+        -- Boss HP + crystal debug
+        pcall(function()
+            -- Boss HP line
+            local hud = lp.PlayerGui:FindFirstChild("MainHud")
+            local holder = hud and hud:FindFirstChild("holder")
+            local bossUi = holder and holder:FindFirstChild("BossUi")
+            local healthLabel = bossUi and bossUi:FindFirstChild("health")
+            if healthLabel then
+                local txt = tostring(healthLabel.Text)
+                if RaidState.BossHighHp then
+                    bossDebugLbl.Text = "Boss: " .. txt .. " | Crystal ON"
+                    bossDebugLbl.TextColor3 = C.grn
+                else
+                    bossDebugLbl.Text = "Boss: " .. txt .. " | Crystal OFF"
+                    bossDebugLbl.TextColor3 = Color3.fromRGB(235,160,25)
+                end
+            else
+                bossDebugLbl.Text = "BossUi: not found"
+                bossDebugLbl.TextColor3 = C.txt2
+            end
+
+            -- Crystal detection debug: show what's found / not found
+            local live = Workspace:FindFirstChild("Live")
+            if not live then
+                bossDebugLbl.Text = bossDebugLbl.Text .. " | Live: NO"
+                return
+            end
+            local found = {}
+            for _, name in ipairs({"Netherstar1","Netherstar2","Netherstar3"}) do
+                if live:FindFirstChild(name, true) then
+                    table.insert(found, name:gsub("Netherstar","NS"))
+                end
+            end
+            if #found > 0 then
+                bossDebugLbl.Text = bossDebugLbl.Text .. " | " .. table.concat(found,",")
+                bossDebugLbl.TextColor3 = C.grn
+            else
+                -- Live exists but no Netherstars — list first 5 child names for debug
+                local kids = {}
+                for i, ch in ipairs(live:GetChildren()) do
+                    if i > 5 then break end
+                    table.insert(kids, ch.Name)
+                end
+                bossDebugLbl.Text = bossDebugLbl.Text .. " | Live kids: " .. table.concat(kids,",")
+            end
+        end)
     end
 
     -- Auto Raid toggle — ON by default
