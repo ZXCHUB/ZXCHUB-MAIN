@@ -967,7 +967,7 @@ function StartRaidLoop()
 
         local function IsCrystalAlive(name)
             local live = GetLiveFolder()
-            return live and live:FindFirstChild(name) ~= nil
+            return live and live:FindFirstChild(name, true) ~= nil  -- recursive within Live
         end
 
         local function AnyCrystalsAlive()
@@ -990,7 +990,7 @@ function StartRaidLoop()
                     while Flags.AutoRaidEnabled and not IsInRaidPlace do
                         -- Re-fetch every tick so we always have the live reference
                         local live = GetLiveFolder()
-                        local star = live and live:FindFirstChild(starName)
+                        local star = live and live:FindFirstChild(starName, true)
                         if not star then break end  -- model gone → move to next crystal
 
                         RaidState.CurrentTarget = star
@@ -1088,26 +1088,39 @@ end)
 -- BossUi health poller: every 1s read MainHud.holder.BossUi.health text
 -- Format: "current/max" — set BossHighHp = true only if max > 9999
 task.spawn(function()
+    local lastState = nil  -- track changes for toast debug
     while true do
         task.wait(1)
+        local newState = false
+        local debugText = "no UI"
         pcall(function()
-            local healthLabel = lp.PlayerGui.MainHud.holder.BossUi.health
+            local hud = lp.PlayerGui:FindFirstChild("MainHud")
+            local holder = hud and hud:FindFirstChild("holder")
+            local bossUi = holder and holder:FindFirstChild("BossUi")
+            local healthLabel = bossUi and bossUi:FindFirstChild("health")
+            if not healthLabel then debugText = "label not found" return end
             local text = tostring(healthLabel.Text)
-            -- Parse second number after "/" (may have commas, e.g. "8,000/10,000")
-            local maxStr = text:match("/([%d,]+)")
+            debugText = text
+            -- strip whitespace, then grab all digit groups
+            local clean = text:gsub("%s+", "")
+            -- find two numbers separated by any non-digit character
+            local curStr, maxStr = clean:match("(%d[%d,]*)%D+(%d[%d,]*)")
             if maxStr then
                 local maxVal = tonumber(maxStr:gsub(",", ""))
-                RaidState.BossHighHp = maxVal ~= nil and maxVal > 9999
-            else
-                RaidState.BossHighHp = false
+                if maxVal and maxVal > 9999 then
+                    newState = true
+                end
             end
         end)
-        -- If the path doesn't exist (no boss UI visible) → reset flag
-        local ok = pcall(function()
-            return lp.PlayerGui.MainHud.holder.BossUi.health
-        end)
-        if not ok then
-            RaidState.BossHighHp = false
+        RaidState.BossHighHp = newState
+        -- Toast when state changes so you can see it working
+        if newState ~= lastState then
+            lastState = newState
+            if newState then
+                Toast("BossHP", "Crystal mode ON | " .. debugText, "ok")
+            else
+                Toast("BossHP", "Crystal mode OFF | " .. debugText, "warn")
+            end
         end
     end
 end)
