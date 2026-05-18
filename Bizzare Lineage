@@ -794,30 +794,42 @@ end
 
 local NETHERSTAR_NAMES = {Netherstar1=true, Netherstar2=true, Netherstar3=true}
 
--- Returns Netherstar model by name from Workspace.Live if it exists (no health/hrp requirement)
+-- Returns Netherstar model by name — direct child of Workspace.Live only
 function FindNetherstareInLive(name)
-    local folder = Workspace:FindFirstChild("Live")
-    if not folder then return nil end
-    return folder:FindFirstChild(name, true)
+    local live = Workspace:FindFirstChild("Live")
+    if not live then return nil end
+    return live:FindFirstChild(name)
 end
 
--- Get any BasePart from a model to use for positioning (HumanoidRootPart preferred)
-function GetModelRootPart(model)
-    return model:FindFirstChild("HumanoidRootPart")
-        or model.PrimaryPart
-        or model:FindFirstChildOfClass("BasePart")
-        or model:FindFirstChildOfClass("MeshPart")
-        or model:FindFirstChildOfClass("UnionOperation")
+-- Get position from any object inside a model — tries everything available
+function GetCrystalPosition(model)
+    if not model then return nil end
+    -- 1. HumanoidRootPart (recursive)
+    local hrp = model:FindFirstChild("HumanoidRootPart", true)
+    if hrp and hrp:IsA("BasePart") then return hrp.Position end
+    -- 2. PrimaryPart
+    if model.PrimaryPart then return model.PrimaryPart.Position end
+    -- 3. Any BasePart anywhere inside (recursive)
+    local bp = model:FindFirstChildWhichIsA("BasePart", true)
+    if bp then return bp.Position end
+    -- 4. GetPivot() — works if the model has a set pivot
+    local ok, pivot = pcall(function() return model:GetPivot() end)
+    if ok and pivot then return pivot.Position end
+    -- 5. GetBoundingBox() — gives center of the model's bounding box
+    local ok2, cf = pcall(function() return model:GetBoundingBox() end)
+    if ok2 and cf then return cf.Position end
+    return nil
 end
 
--- Teleport player above a crystal (works without HumanoidRootPart)
+-- Teleport player above a crystal — if no position found, skip move but still attack
 function GlideAboveCrystal(crystal)
     local root = GetRoot()
     local hum = GetHumanoid()
-    local part = GetModelRootPart(crystal)
-    if not root or not part then return end
-    local hoverPos = part.Position + Vector3.new(0, FarmState.HoverHeight, 0)
-    local lookPos  = part.Position + Vector3.new(0, 0.15, 0)
+    if not root then return end
+    local pos = GetCrystalPosition(crystal)
+    if not pos then return end  -- can't find any part — skip repositioning this tick
+    local hoverPos = pos + Vector3.new(0, FarmState.HoverHeight, 0)
+    local lookPos  = pos + Vector3.new(0, 0.15, 0)
     root.CFrame = CFrame.lookAt(hoverPos, lookPos)
     root.AssemblyLinearVelocity = Vector3.zero
     root.AssemblyAngularVelocity = Vector3.zero
@@ -947,40 +959,50 @@ function StartRaidLoop()
         end)
         task.wait(2)
 
-        -- Step 4: if Netherstar1/2/3 exist → kill them first, then normal NPCs
+        -- Step 4: if Netherstar1/2/3 exist in Live → kill them first, then normal NPCs
+        local function GetLiveFolder()
+            return Workspace:FindFirstChild("Live")
+        end
+
+        local function IsCrystalAlive(name)
+            local live = GetLiveFolder()
+            return live and live:FindFirstChild(name) ~= nil
+        end
+
         local function AnyCrystalsAlive()
-            return FindNetherstareInLive("Netherstar1")
-                or FindNetherstareInLive("Netherstar2")
-                or FindNetherstareInLive("Netherstar3")
+            return IsCrystalAlive("Netherstar1")
+                or IsCrystalAlive("Netherstar2")
+                or IsCrystalAlive("Netherstar3")
         end
 
         while Flags.AutoRaidEnabled and not IsInRaidPlace do
 
             if AnyCrystalsAlive() then
-                -- ── CRYSTAL MODE: kill Netherstar1 → 2 → 3 ──
-                -- Attack each crystal until its model DISAPPEARS from Workspace,
+                -- ── CRYSTAL MODE: kill Netherstar1 → 2 → 3 (in order) ──
+                -- Attack each crystal until it DISAPPEARS from Workspace.Live,
                 -- then move to next. Outer while re-checks after all 3 tried.
                 for _, starName in ipairs({"Netherstar1", "Netherstar2", "Netherstar3"}) do
                     if not Flags.AutoRaidEnabled or IsInRaidPlace then break end
-                    local star = FindNetherstareInLive(starName)
-                    if star then
+                    if not IsCrystalAlive(starName) then continue end  -- already gone, skip
+
+                    -- Attack until this crystal disappears from Live folder
+                    while Flags.AutoRaidEnabled and not IsInRaidPlace do
+                        -- Re-fetch every tick so we always have the live reference
+                        local live = GetLiveFolder()
+                        local star = live and live:FindFirstChild(starName)
+                        if not star then break end  -- model gone → move to next crystal
+
                         RaidState.CurrentTarget = star
-                        RaidState.LastTargetScan = tick()
-                        -- Attack until model is fully removed from Workspace
-                        while Flags.AutoRaidEnabled and not IsInRaidPlace do
-                            if not star or not star:IsDescendantOf(Workspace) then break end
-                            if not GetModelRootPart(star) then break end
-                            GlideAboveCrystal(star)
-                            if tick() - RaidState.LastM1 >= 0.3 then
-                                RaidState.LastM1 = tick()
-                                DoM1()
-                            end
-                            if Flags.RaidUseSkills ~= false then DoSkillsAsync() end
-                            task.wait(0.1)
+                        GlideAboveCrystal(star)
+                        if tick() - RaidState.LastM1 >= 0.3 then
+                            RaidState.LastM1 = tick()
+                            DoM1()
                         end
-                        RaidState.CurrentTarget = nil
-                        task.wait(0.3)
+                        if Flags.RaidUseSkills ~= false then DoSkillsAsync() end
+                        task.wait(0.1)
                     end
+                    RaidState.CurrentTarget = nil
+                    task.wait(0.2)
                 end
                 -- outer while re-checks AnyCrystalsAlive at top of next iteration
 
@@ -1046,17 +1068,16 @@ function AutoRaidStep()
     -- (StartRaidLoop is triggered from the toggle)
 end
 
--- Stand auto-summon: every 2s check Workspace.Live.[PlayerName] for Stand_Weapon
--- If missing → summon stand
+-- Stand auto-summon: every 2s check Workspace.Effects for ".[PlayerName]'s Stand"
+-- If that model is absent → summon stand
 task.spawn(function()
     while true do
         task.wait(2)
         pcall(function()
-            local liveFolder = Workspace:FindFirstChild("Live")
-            if not liveFolder then return end
-            local playerFolder = liveFolder:FindFirstChild(lp.Name)
-            if not playerFolder then return end
-            if not playerFolder:FindFirstChild("Stand_Weapon") then
+            local effectsFolder = Workspace:FindFirstChild("Effects")
+            if not effectsFolder then return end
+            local standName = "." .. lp.Name .. "'s Stand"
+            if not effectsFolder:FindFirstChild(standName) then
                 SummonStand()
             end
         end)
