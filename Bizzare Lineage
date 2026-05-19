@@ -762,7 +762,7 @@ end
 function BuildRaidSellList()
     local sellList = {}
     for _, item in ipairs(GetRaidInventoryItems()) do
-        if type(item) == "table" and item.ID and item.Name and RAID_SELLABLE_LOOKUP[CanonNameKey(item.Name)] then
+        if type(item) == "table" and item.ID and item.Name and not item.Locked and RAID_SELLABLE_LOOKUP[CanonNameKey(item.Name)] then
             table.insert(sellList, {
                 ID = item.ID,
                 Pips = {},
