@@ -1249,7 +1249,7 @@ function StartRaidLoop()
                     while Flags.AutoRaidEnabled and not IsInRaidPlace do
                         if FindNearestNonNetherstarNpc() then break end
                         if IsRaidCompleteVisible() then
-                            task.wait(2)
+                            task.wait(5)
                             if Flags.AutoRaidEnabled and not IsInRaidPlace and IsRaidCompleteVisible() and tick() - RaidState.LastRetryAt >= 1.5 then
                                 RaidState.LastRetryAt = tick()
                                 pcall(function()
